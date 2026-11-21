@@ -121,7 +121,7 @@
     }
     function initClient() {
       if (!window.supabase?.createClient) throw new Error('No se pudo cargar la librería de Supabase. Comprueba tu conexión a Internet y recarga la página.');
-      if (!SUPABASE_PUBLISHABLE_KEY || SUPABASE_PUBLISHABLE_KEY === 'sb_publishable_uvaaGQNtJRrCpvEvcNgM4Q_Vr0iWRED') {
+      if (!SUPABASE_PUBLISHABLE_KEY || SUPABASE_PUBLISHABLE_KEY === 'PEGA_AQUI_TU_SB_PUBLISHABLE_KEY') {
         throw new Error('Falta pegar tu clave sb_publishable_ en la configuración de este archivo.');
       }
       state.client = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
