@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#120d19">
   <meta name="description" content="Zurey Business OS: plataforma de gestión empresarial personalizable.">
-  <title>Zurey Business OS · v0.3</title>
+  <title>Zurey Business OS · v0.4</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
@@ -13,7 +13,7 @@
     :root{color-scheme:dark;--bg:#100c15;--panel:#191321;--panel2:#21182c;--panel3:#2b2039;--line:#352742;--text:#f7f2fc;--muted:#b6a8c5;--purple:#9869c7;--lilac:#d2b3f2;--good:#75d5ad;--bad:#ff9b9b;--shadow:0 22px 65px #05030880}
     *{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 15% -10%,#38244d 0,transparent 35%),radial-gradient(ellipse at 100% 10%,#24162f 0,transparent 30%),var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;min-height:100vh}button,input,select,textarea{font:inherit}button{cursor:pointer}.hidden{display:none!important}
     .shell{min-height:100vh;display:grid;place-items:center;padding:28px}.auth-card{width:min(100%,460px);background:#191321ed;border:1px solid var(--line);border-radius:24px;padding:30px;box-shadow:var(--shadow);backdrop-filter:blur(18px)}
-    .brand{display:flex;align-items:center;gap:13px;margin-bottom:28px}.brand-mark{height:49px;width:49px;flex:0 0 49px;border-radius:16px;background:linear-gradient(145deg,#261a35 0%,#120d19 100%);border:1px solid #6f5488;display:grid;place-items:center;box-shadow:inset 0 1px 0 #ffffff18,0 9px 27px #9b6aca28;position:relative;overflow:hidden}.brand-mark:after{content:'';position:absolute;inset:1px;border-radius:15px;background:radial-gradient(circle at 30% 15%,#d8b9f31a,transparent 58%);pointer-events:none}.brand-symbol{width:39px;height:39px;position:relative;z-index:1;filter:drop-shadow(0 2px 8px #bd91ed55)}.brand-name{font:800 18px Manrope;letter-spacing:.17em}.brand-sub{font-size:9px;color:var(--lilac);letter-spacing:.24em;margin-top:4px}.eyebrow{font-size:11px;letter-spacing:.18em;color:var(--lilac);font-weight:700;text-transform:uppercase}.auth-card h1{font:800 29px Manrope;letter-spacing:-.04em;margin:9px 0 8px}.desc{color:var(--muted);font-size:14px;line-height:1.6;margin:0 0 24px}.tabs{display:grid;grid-template-columns:1fr 1fr;background:#100b16;border:1px solid var(--line);padding:4px;border-radius:12px;margin-bottom:20px}.tab{background:transparent;border:0;color:var(--muted);padding:10px;border-radius:9px;font-weight:700}.tab.active{background:#332342;color:#fff}.field{display:grid;gap:7px;margin:14px 0}.field label{font-size:12px;color:#d6c8e3;font-weight:600}.field input,.field select,.field textarea{width:100%;background:#100c16;border:1px solid #41304f;border-radius:11px;color:var(--text);padding:13px 14px;outline:none}.field textarea{min-height:82px;resize:vertical}.field input:focus,.field select:focus,.field textarea:focus{border-color:var(--lilac);box-shadow:0 0 0 3px #b98ae522}.btn{border:0;border-radius:11px;padding:12px 16px;font-weight:700;transition:.18s}.btn:disabled{opacity:.6;cursor:not-allowed}.btn-primary{background:linear-gradient(100deg,#a77bd2,#8553b3);color:white;box-shadow:0 9px 22px #8c5bb533}.btn-primary:hover{filter:brightness(1.08);transform:translateY(-1px)}.btn-secondary{background:#2b2038;border:1px solid #49365c;color:#e8d8f7}.btn-danger{background:#3a202b;border:1px solid #754050;color:#ffc0c0}.btn-block{width:100%;margin-top:10px}.message{display:none;margin:15px 0 0;padding:11px 13px;border-radius:10px;font-size:13px;line-height:1.5}.message.show{display:block}.message.info{background:#2b2137;color:#e8d8f7;border:1px solid #56416b}.message.success{background:#142b24;color:#a5efcf;border:1px solid #28684e}.message.error{background:#321d25;color:#ffc0c0;border:1px solid #754050}.fine{font-size:11px;color:#91849e;line-height:1.55;margin:17px 0 0}.topline{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:22px}.pill{font-size:10px;letter-spacing:.12em;border:1px solid #58416d;border-radius:99px;padding:6px 9px;color:#ddc4f5;background:#352443}.onboard{max-width:560px}
+    .brand{display:flex;align-items:center;gap:13px;margin-bottom:28px}.brand-mark{height:49px;width:49px;flex:0 0 49px;border-radius:16px;background:linear-gradient(145deg,#261a35 0%,#120d19 100%);border:1px solid #6f5488;display:grid;place-items:center;box-shadow:inset 0 1px 0 #ffffff18,0 9px 27px #9b6aca28;position:relative;overflow:hidden}.brand-mark:after{content:'';position:absolute;inset:1px;border-radius:15px;background:radial-gradient(circle at 30% 15%,#d8b9f31a,transparent 58%);pointer-events:none}.brand-mark{border-radius:50%;background:#111827;border:1px solid #34405a}.brand-symbol{width:39px;height:39px;position:relative;z-index:1;filter:drop-shadow(0 2px 8px #9B75C955)}.btn-primary{background:linear-gradient(100deg,var(--brand-accent,#9B75C9),#7650a8)}.nav-item.active{background:var(--panel2,#352443);border-color:var(--brand-accent,#4c3761)}.brand-name{font:800 18px Manrope;letter-spacing:.17em}.brand-sub{font-size:9px;color:var(--lilac);letter-spacing:.24em;margin-top:4px}.eyebrow{font-size:11px;letter-spacing:.18em;color:var(--lilac);font-weight:700;text-transform:uppercase}.auth-card h1{font:800 29px Manrope;letter-spacing:-.04em;margin:9px 0 8px}.desc{color:var(--muted);font-size:14px;line-height:1.6;margin:0 0 24px}.tabs{display:grid;grid-template-columns:1fr 1fr;background:#100b16;border:1px solid var(--line);padding:4px;border-radius:12px;margin-bottom:20px}.tab{background:transparent;border:0;color:var(--muted);padding:10px;border-radius:9px;font-weight:700}.tab.active{background:#332342;color:#fff}.field{display:grid;gap:7px;margin:14px 0}.field label{font-size:12px;color:#d6c8e3;font-weight:600}.field input,.field select,.field textarea{width:100%;background:#100c16;border:1px solid #41304f;border-radius:11px;color:var(--text);padding:13px 14px;outline:none}.field textarea{min-height:82px;resize:vertical}.field input:focus,.field select:focus,.field textarea:focus{border-color:var(--lilac);box-shadow:0 0 0 3px #b98ae522}.btn{border:0;border-radius:11px;padding:12px 16px;font-weight:700;transition:.18s}.btn:disabled{opacity:.6;cursor:not-allowed}.btn-primary{background:linear-gradient(100deg,#a77bd2,#8553b3);color:white;box-shadow:0 9px 22px #8c5bb533}.btn-primary:hover{filter:brightness(1.08);transform:translateY(-1px)}.btn-secondary{background:#2b2038;border:1px solid #49365c;color:#e8d8f7}.btn-danger{background:#3a202b;border:1px solid #754050;color:#ffc0c0}.btn-block{width:100%;margin-top:10px}.message{display:none;margin:15px 0 0;padding:11px 13px;border-radius:10px;font-size:13px;line-height:1.5}.message.show{display:block}.message.info{background:#2b2137;color:#e8d8f7;border:1px solid #56416b}.message.success{background:#142b24;color:#a5efcf;border:1px solid #28684e}.message.error{background:#321d25;color:#ffc0c0;border:1px solid #754050}.fine{font-size:11px;color:#91849e;line-height:1.55;margin:17px 0 0}.topline{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:22px}.pill{font-size:10px;letter-spacing:.12em;border:1px solid #58416d;border-radius:99px;padding:6px 9px;color:#ddc4f5;background:#352443}.onboard{max-width:560px}
     .app{min-height:100vh;display:grid;grid-template-columns:250px 1fr}.sidebar{background:#140f1c;border-right:1px solid var(--line);padding:24px 17px;display:flex;flex-direction:column;gap:22px}.side-brand{padding:0 8px 17px;border-bottom:1px solid var(--line)}.side-nav{display:grid;gap:7px}.nav-label{font-size:10px;letter-spacing:.18em;color:#8e7c9f;padding:0 10px 5px}.nav-item{width:100%;display:flex;align-items:center;gap:11px;padding:11px 12px;border-radius:10px;color:#c8bbd3;font-size:13px;background:transparent;border:1px solid transparent;text-align:left}.nav-item:hover{background:#21182c;color:#fff}.nav-item.active{background:#352443;color:white;border:1px solid #4c3761}.nav-ico{width:20px;text-align:center;color:var(--lilac)}.side-bottom{margin-top:auto}.userbox{background:#21182c;border:1px solid var(--line);border-radius:13px;padding:12px;overflow-wrap:anywhere}.user-email{font-size:11px;color:var(--muted);margin:4px 0 10px}.main{padding:34px clamp(20px,4vw,52px);max-width:1500px;width:100%;margin:0 auto}.main-head{display:flex;justify-content:space-between;align-items:flex-start;gap:18px;margin-bottom:28px}.main-head h1{font:800 clamp(25px,3vw,34px) Manrope;margin:6px 0}.main-head p{color:var(--muted);margin:0;font-size:13px}.stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:15px}.stat{background:linear-gradient(145deg,#21182c,#191321);border:1px solid var(--line);border-radius:17px;padding:20px}.stat-top{display:flex;justify-content:space-between;color:var(--muted);font-size:12px}.stat-icon{color:var(--lilac);font-size:19px}.stat-value{font:800 27px Manrope;margin-top:16px}.stat-note{font-size:11px;color:#9d8eaa;margin-top:5px}.section{margin-top:20px;background:#191321;border:1px solid var(--line);border-radius:17px;padding:20px}.section h2{font:700 16px Manrope;margin:0 0 7px}.section p{font-size:13px;color:var(--muted);line-height:1.6}.module-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:17px}.module{background:#21182c;border:1px solid var(--line);border-radius:13px;padding:15px}.module b{font-size:13px}.module span{display:block;font-size:11px;color:var(--muted);margin-top:6px;line-height:1.5}.empty{padding:16px;border:1px dashed #5d4771;border-radius:12px;color:#cfbddf;font-size:13px;background:#21182c}.toolbar{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}.form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 14px}.table-wrap{overflow-x:auto;margin-top:14px}table{width:100%;border-collapse:collapse;min-width:620px}th,td{text-align:left;padding:12px 10px;border-bottom:1px solid #34273f;font-size:12px;vertical-align:middle}th{color:#bba8ce;font-weight:700}td{color:#eee5f5}.badge-status{display:inline-block;padding:5px 8px;border-radius:99px;background:#332342;color:#dec7f6;font-size:10px}.row-actions{display:flex;gap:7px}.small-btn{padding:7px 10px;font-size:11px}.muted{color:var(--muted)}.two-col{display:grid;grid-template-columns:minmax(260px,.8fr) minmax(0,1.2fr);gap:16px}.help{font-size:11px;color:#9d8eaa;line-height:1.5}.empty-state{padding:20px;text-align:center;color:var(--muted);border:1px dashed #5d4771;border-radius:12px;background:#21182c}
     @media(max-width:850px){.app{grid-template-columns:1fr}.sidebar{position:relative;border-right:0;border-bottom:1px solid var(--line);padding:14px 16px}.side-brand{border:0;padding:0}.side-nav{display:flex;overflow:auto}.nav-label{display:none}.nav-item{width:auto;white-space:nowrap;padding:9px 11px}.side-bottom{display:none}.main{padding:25px 17px}.stats{grid-template-columns:1fr}.module-grid{grid-template-columns:1fr 1fr}.main-head{margin-bottom:20px}.two-col{grid-template-columns:1fr}}
     @media(max-width:480px){.shell{padding:14px}.auth-card{padding:23px 19px}.module-grid,.form-grid{grid-template-columns:1fr}.main-head{display:block}.main-head .pill{display:inline-block;margin-top:14px}}
@@ -22,7 +22,7 @@
 <body>
   <main id="authView" class="shell">
     <section class="auth-card">
-      <div class="brand"><div class="brand-mark" aria-label="Zurey emblem"><svg class="brand-symbol" viewBox="0 0 48 48" role="img" aria-hidden="true"><path d="M24 3.8 42.1 14.2v19.6L24 44.2 5.9 33.8V14.2L24 3.8Z" fill="none" stroke="#A77BD2" stroke-width="1.35"/><path d="M24 10.2 36.5 17.4v13.2L24 37.8l-12.5-7.2V17.4L24 10.2Z" fill="#9B75C9" fill-opacity=".16" stroke="#DCC3F4" stroke-opacity=".9" stroke-width="1.1"/><path d="M24 14.1 32.4 24 24 33.9 15.6 24 24 14.1Z" fill="#C9A3EF"/><path d="M24 18.5 28.7 24 24 29.5 19.3 24 24 18.5Z" fill="#FFF9FF"/><circle cx="24" cy="24" r="1.65" fill="#76509D"/><path d="M38.5 8.2v5.1M36 10.75h5.1" stroke="#E6D3FA" stroke-width="1.05" stroke-linecap="round"/></svg></div><div><div class="brand-name">ZUREY</div><div class="brand-sub">BUSINESS OS</div></div></div>
+      <div class="brand"><div class="brand-mark" aria-label="Zurey emblem"><svg class="brand-symbol" viewBox="0 0 100 100" role="img" aria-label="Logo Zurey"><path d="M18 18H82L18 82H82" fill="none" stroke="#DCC3F4" stroke-width="15" stroke-linejoin="miter"/><path d="M18 18H82L18 82" fill="none" stroke="#9B75C9" stroke-width="15" stroke-linejoin="miter"/><path d="M18 18H82" stroke="#C9A3EF" stroke-width="15"/><path d="M18 82H82" stroke="#F7F2FC" stroke-width="15"/></svg></div><div><div class="brand-name">ZUREY</div><div class="brand-sub">BUSINESS OS</div></div></div>
       <div class="eyebrow">WORKSPACE PLATFORM</div>
       <h1 id="authTitle">Bienvenido de nuevo</h1>
       <p class="desc" id="authDesc">Accede al espacio de trabajo de tu empresa.</p>
@@ -41,7 +41,7 @@
 
   <main id="onboardView" class="shell hidden">
     <section class="auth-card onboard">
-      <div class="topline"><div class="brand" style="margin:0"><div class="brand-mark" aria-label="Zurey emblem"><svg class="brand-symbol" viewBox="0 0 48 48" role="img" aria-hidden="true"><path d="M24 3.8 42.1 14.2v19.6L24 44.2 5.9 33.8V14.2L24 3.8Z" fill="none" stroke="#A77BD2" stroke-width="1.35"/><path d="M24 10.2 36.5 17.4v13.2L24 37.8l-12.5-7.2V17.4L24 10.2Z" fill="#9B75C9" fill-opacity=".16" stroke="#DCC3F4" stroke-opacity=".9" stroke-width="1.1"/><path d="M24 14.1 32.4 24 24 33.9 15.6 24 24 14.1Z" fill="#C9A3EF"/><path d="M24 18.5 28.7 24 24 29.5 19.3 24 24 18.5Z" fill="#FFF9FF"/><circle cx="24" cy="24" r="1.65" fill="#76509D"/><path d="M38.5 8.2v5.1M36 10.75h5.1" stroke="#E6D3FA" stroke-width="1.05" stroke-linecap="round"/></svg></div><div><div class="brand-name">ZUREY</div><div class="brand-sub">BUSINESS OS</div></div></div><span class="pill">CONFIGURACIÓN INICIAL</span></div>
+      <div class="topline"><div class="brand" style="margin:0"><div class="brand-mark" aria-label="Zurey emblem"><svg class="brand-symbol" viewBox="0 0 100 100" role="img" aria-label="Logo Zurey"><path d="M18 18H82L18 82H82" fill="none" stroke="#DCC3F4" stroke-width="15" stroke-linejoin="miter"/><path d="M18 18H82L18 82" fill="none" stroke="#9B75C9" stroke-width="15" stroke-linejoin="miter"/><path d="M18 18H82" stroke="#C9A3EF" stroke-width="15"/><path d="M18 82H82" stroke="#F7F2FC" stroke-width="15"/></svg></div><div><div class="brand-name">ZUREY</div><div class="brand-sub">BUSINESS OS</div></div></div><span class="pill">CONFIGURACIÓN INICIAL</span></div>
       <div class="eyebrow">TU ESPACIO DE TRABAJO</div>
       <h1>Crea el espacio de tu empresa</h1>
       <p class="desc">Este será el espacio privado donde administrarás clientes, servicios, pedidos y finanzas.</p>
@@ -57,7 +57,7 @@
 
   <main id="appView" class="app hidden">
     <aside class="sidebar">
-      <div class="side-brand"><div class="brand" style="margin:0"><div class="brand-mark" aria-label="Zurey emblem"><svg class="brand-symbol" viewBox="0 0 48 48" role="img" aria-hidden="true"><path d="M24 3.8 42.1 14.2v19.6L24 44.2 5.9 33.8V14.2L24 3.8Z" fill="none" stroke="#A77BD2" stroke-width="1.35"/><path d="M24 10.2 36.5 17.4v13.2L24 37.8l-12.5-7.2V17.4L24 10.2Z" fill="#9B75C9" fill-opacity=".16" stroke="#DCC3F4" stroke-opacity=".9" stroke-width="1.1"/><path d="M24 14.1 32.4 24 24 33.9 15.6 24 24 14.1Z" fill="#C9A3EF"/><path d="M24 18.5 28.7 24 24 29.5 19.3 24 24 18.5Z" fill="#FFF9FF"/><circle cx="24" cy="24" r="1.65" fill="#76509D"/><path d="M38.5 8.2v5.1M36 10.75h5.1" stroke="#E6D3FA" stroke-width="1.05" stroke-linecap="round"/></svg></div><div><div class="brand-name">ZUREY</div><div class="brand-sub">BUSINESS OS</div></div></div></div>
+      <div class="side-brand"><div class="brand" style="margin:0"><div class="brand-mark" aria-label="Zurey emblem"><svg class="brand-symbol" viewBox="0 0 100 100" role="img" aria-label="Logo Zurey"><path d="M18 18H82L18 82H82" fill="none" stroke="#DCC3F4" stroke-width="15" stroke-linejoin="miter"/><path d="M18 18H82L18 82" fill="none" stroke="#9B75C9" stroke-width="15" stroke-linejoin="miter"/><path d="M18 18H82" stroke="#C9A3EF" stroke-width="15"/><path d="M18 82H82" stroke="#F7F2FC" stroke-width="15"/></svg></div><div><div class="brand-name">ZUREY</div><div class="brand-sub">BUSINESS OS</div></div></div></div>
       <nav class="side-nav" aria-label="Navegación principal">
         <div class="nav-label">WORKSPACE</div>
         <button class="nav-item active" type="button" data-page="dashboard"><span class="nav-ico">▦</span>Dashboard</button>
@@ -66,6 +66,7 @@
         <button class="nav-item" type="button" data-page="services"><span class="nav-ico">◈</span>Servicios</button>
         <button class="nav-item" type="button" data-page="orders"><span class="nav-ico">▣</span>Pedidos</button>
         <button class="nav-item" type="button" data-page="finance"><span class="nav-ico">＄</span>Finanzas</button>
+        <button class="nav-item" type="button" data-page="appearance"><span class="nav-ico">◐</span>Apariencia</button>
       </nav>
       <div class="side-bottom"><div class="userbox"><div class="eyebrow">SESIÓN ACTIVA</div><div id="sideCompany" style="font-weight:700;margin-top:7px">Empresa</div><div id="sideEmail" class="user-email"></div><button class="btn btn-secondary btn-block" id="logoutBtn" type="button">Cerrar sesión</button></div></div>
     </aside>
@@ -91,7 +92,8 @@
       leads: ['Prospectos', 'Registra y da seguimiento a posibles clientes.', 'GESTIÓN COMERCIAL'],
       services: ['Servicios', 'Organiza el catálogo y los precios que ofreces.', 'CATÁLOGO'],
       orders: ['Pedidos', 'Controla los trabajos y sus fechas de entrega.', 'OPERACIONES'],
-      finance: ['Finanzas', 'Consulta los pagos registrados de tu empresa.', 'FINANZAS']
+      finance: ['Finanzas', 'Consulta los pagos registrados de tu empresa.', 'FINANZAS'],
+      appearance: ['Apariencia', 'Personaliza la identidad visual de tu espacio de trabajo.', 'PERSONALIZACIÓN']
     };
 
     function showMessage(id, text, type = 'info') {
@@ -189,10 +191,11 @@
       if (memberError) throw memberError;
       if (!memberships?.length) { showView('onboard'); return; }
       const ids = memberships.map(row => row.company_id);
-      const { data: companies, error: companyError } = await state.client.from('companies').select('id,name,currency,primary_color,accent_color,logo_url').in('id', ids);
+      const { data: companies, error: companyError } = await state.client.from('companies').select('id,name,currency,primary_color,accent_color,secondary_color,logo_url').in('id', ids);
       if (companyError) throw companyError;
       if (!companies?.length) { showView('onboard'); return; }
       state.company = companies[0];
+      applyCompanyAppearance();
       $('sideCompany').textContent = state.company.name;
       $('sideEmail').textContent = state.user?.email || '';
       await navigate('dashboard');
@@ -214,6 +217,7 @@
         if (page === 'services') await renderServices();
         if (page === 'orders') await renderOrders();
         if (page === 'finance') await renderFinance();
+        if (page === 'appearance') await renderAppearance();
       } catch (error) {
         content.innerHTML = '<div class="empty-state">No se pudo cargar esta sección.</div>';
         showMessage('globalMessage', friendlyError(error), 'error');
@@ -223,6 +227,87 @@
       const { count, error } = await state.client.from(table).select('id', {count:'exact', head:true}).eq('company_id', state.company.id);
       if (error) throw error; return count ?? 0;
     }
+    function safeColor(value, fallback) { return /^#[0-9a-fA-F]{6}$/.test(value || '') ? value : fallback; }
+    function applyCompanyAppearance() {
+      if (!state.company) return;
+      const primary = safeColor(state.company.primary_color, '#17111F');
+      const accent = safeColor(state.company.accent_color, '#9B75C9');
+      const secondary = safeColor(state.company.secondary_color, '#30213D');
+      document.documentElement.style.setProperty('--purple', accent);
+      document.documentElement.style.setProperty('--lilac', primary === '#17111F' ? '#DCC3F4' : primary);
+      document.documentElement.style.setProperty('--panel2', secondary);
+      document.documentElement.style.setProperty('--brand-accent', accent);
+      document.documentElement.style.setProperty('--brand-primary', primary);
+      document.querySelectorAll('.brand-mark').forEach(el => {
+        const existing = el.querySelector('img');
+        if (state.company.logo_url && state.company.logo_url.startsWith('data:image/') ) {
+          if (!existing) { el.innerHTML = '<img alt="Logo de empresa" style="width:100%;height:100%;object-fit:contain;padding:5px">'; }
+          el.querySelector('img').src = state.company.logo_url;
+        } else if (existing) { el.innerHTML = '<svg class="brand-symbol" viewBox="0 0 100 100" role="img" aria-label="Logo Zurey"><path d="M18 18H82L18 82H82" fill="none" stroke="#DCC3F4" stroke-width="15" stroke-linejoin="miter"/><path d="M18 18H82L18 82" fill="none" stroke="#9B75C9" stroke-width="15" stroke-linejoin="miter"/><path d="M18 18H82" stroke="#C9A3EF" stroke-width="15"/><path d="M18 82H82" stroke="#F7F2FC" stroke-width="15"/></svg>'; }
+      });
+      document.querySelectorAll('.brand-name').forEach(el => el.textContent = state.company.name || 'ZUREY');
+    }
+    async function renderAppearance() {
+      const c = state.company;
+      const primary = safeColor(c.primary_color, '#17111F');
+      const accent = safeColor(c.accent_color, '#9B75C9');
+      const secondary = safeColor(c.secondary_color, '#30213D');
+      $('pageContent').innerHTML = `
+        <div class="two-col">
+          <section class="section" style="margin-top:0">
+            <h2>Identidad de tu empresa</h2><p>Personaliza el logotipo y los colores de este espacio. Los cambios se guardan para esta empresa.</p>
+            <form id="appearanceForm">
+              <div class="field"><label for="companyLogo">Logotipo de la empresa</label><input id="companyLogo" type="file" accept="image/png,image/jpeg,image/webp"><div class="help">Sube PNG, JPG o WebP. Recomendado: imagen cuadrada de hasta 1 MB.</div></div>
+              <div id="logoPreviewWrap" class="empty-state" style="display:flex;align-items:center;gap:14px;margin:12px 0"><img id="logoPreview" alt="Vista previa del logo" style="width:76px;height:76px;object-fit:contain;border-radius:14px;background:#111827;padding:5px"><span>Vista previa del logotipo</span></div>
+              <div class="form-grid">
+                <div class="field"><label for="primaryColor">Color principal</label><input id="primaryColor" type="color" value="${primary}" style="height:48px;padding:5px"></div>
+                <div class="field"><label for="accentColor">Color de acento</label><input id="accentColor" type="color" value="${accent}" style="height:48px;padding:5px"></div>
+                <div class="field"><label for="secondaryColor">Color secundario</label><input id="secondaryColor" type="color" value="${secondary}" style="height:48px;padding:5px"></div>
+              </div>
+              <button class="btn btn-primary" type="submit" id="saveAppearance">Guardar apariencia</button>
+              <button class="btn btn-secondary" type="button" id="resetAppearance">Restaurar colores predeterminados</button>
+            </form>
+            <div id="appearanceMessage" class="message" role="status" aria-live="polite"></div>
+          </section>
+          <section class="section" style="margin-top:0"><h2>Vista previa</h2><p>Así se verá la identidad de tu espacio.</p>
+            <div id="appearancePreview" style="border:1px solid #49365c;border-radius:16px;padding:20px;background:${secondary}">
+              <div style="display:flex;align-items:center;gap:12px"><div id="previewMark" style="width:54px;height:54px;border-radius:14px;background:${primary};display:grid;place-items:center;overflow:hidden;color:white;font-size:26px;font-weight:800">Z</div><div><strong>${escapeHTML(c.name)}</strong><div style="font-size:11px;opacity:.75">BUSINESS WORKSPACE</div></div></div>
+              <div style="margin-top:24px;font-size:22px;font-weight:800">Tu empresa, tu identidad.</div><div style="margin-top:8px;font-size:12px;opacity:.8">Una experiencia visual personalizada.</div>
+              <div id="previewButton" style="display:inline-block;margin-top:20px;padding:10px 15px;border-radius:9px;background:${accent};color:white;font-size:12px;font-weight:700">Botón de ejemplo</div>
+            </div>
+          </section>
+        </div>`;
+      const preview = () => {
+        $('appearancePreview').style.background = $('secondaryColor').value;
+        $('previewMark').style.background = $('primaryColor').value;
+        $('previewButton').style.background = $('accentColor').value;
+        $('previewMark').textContent = 'Z';
+        if (logoData) $('previewMark').innerHTML = `<img src="${logoData}" style="width:100%;height:100%;object-fit:contain;padding:4px">`;
+      };
+      let logoData = c.logo_url && c.logo_url.startsWith('data:image/') ? c.logo_url : null;
+      if (logoData) $('logoPreview').src = logoData;
+      else $('logoPreview').src = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" rx="15" fill="#17111F"/><path d="M20 25H80L20 75H80" fill="none" stroke="#B68AE0" stroke-width="12"/><path d="M20 75H80" stroke="#fff" stroke-width="12"/></svg>');
+      ['primaryColor','accentColor','secondaryColor'].forEach(id => $(id).addEventListener('input', preview));
+      $('companyLogo').addEventListener('change', async e => {
+        const file = e.target.files?.[0]; if (!file) return;
+        if (!['image/png','image/jpeg','image/webp'].includes(file.type)) { showMessage('appearanceMessage','Usa una imagen PNG, JPG o WebP.','error'); e.target.value=''; return; }
+        if (file.size > 1024*1024) { showMessage('appearanceMessage','La imagen supera 1 MB. Reduce su tamaño antes de subirla.','error'); e.target.value=''; return; }
+        const reader = new FileReader(); reader.onload = () => { logoData = reader.result; $('logoPreview').src = logoData; preview(); }; reader.readAsDataURL(file);
+      });
+      preview();
+      $('appearanceForm').addEventListener('submit', async e => {
+        e.preventDefault(); const btn=$('saveAppearance'); btn.disabled=true; btn.textContent='Guardando…';
+        const updates={primary_color:$('primaryColor').value,accent_color:$('accentColor').value,secondary_color:$('secondaryColor').value,logo_url:logoData};
+        try {
+          const {error}=await state.client.from('companies').update(updates).eq('id',state.company.id);
+          if(error) throw error;
+          state.company={...state.company,...updates}; applyCompanyAppearance(); showMessage('appearanceMessage','Apariencia guardada correctamente para esta empresa.','success');
+        } catch(err) { showMessage('appearanceMessage',friendlyError(err),'error'); }
+        finally { btn.disabled=false; btn.textContent='Guardar apariencia'; }
+      });
+      $('resetAppearance').addEventListener('click',()=>{ $('primaryColor').value='#17111F'; $('accentColor').value='#9B75C9'; $('secondaryColor').value='#30213D'; logoData=null; $('companyLogo').value=''; $('logoPreview').src='data:image/svg+xml,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" rx="15" fill="#17111F"/><path d="M20 25H80L20 75H80" fill="none" stroke="#B68AE0" stroke-width="12"/><path d="M20 75H80" stroke="#fff" stroke-width="12"/></svg>'); preview(); });
+    }
+
     async function renderDashboard() {
       const [customers, orders, payments, leads, services] = await Promise.all(['customers','orders','payments','leads','services'].map(getCount));
       $('pageContent').innerHTML = `
@@ -311,7 +396,7 @@
     });
     $('companyForm').addEventListener('submit',async event=>{
       event.preventDefault();clearMessage('companyMessage');setBusy('companySubmit',true);const name=$('companyName').value.trim();const currency=$('currency').value;
-      try{const {data,error}=await state.client.rpc('create_company',{p_name:name,p_currency:currency});if(error)throw error;const {data:companies,error:fetchError}=await state.client.from('companies').select('id,name,currency,primary_color,accent_color,logo_url').eq('id',data).limit(1);if(fetchError)throw fetchError;if(!companies?.length)throw new Error('La empresa se creó, pero no pudimos cargarla. Cierra sesión e inicia sesión de nuevo.');state.company=companies[0];$('sideCompany').textContent=state.company.name;$('sideEmail').textContent=state.user?.email||'';await navigate('dashboard');}
+      try{const {data,error}=await state.client.rpc('create_company',{p_name:name,p_currency:currency});if(error)throw error;const {data:companies,error:fetchError}=await state.client.from('companies').select('id,name,currency,primary_color,accent_color,secondary_color,logo_url').eq('id',data).limit(1);if(fetchError)throw fetchError;if(!companies?.length)throw new Error('La empresa se creó, pero no pudimos cargarla. Cierra sesión e inicia sesión de nuevo.');state.company=companies[0];applyCompanyAppearance();$('sideCompany').textContent=state.company.name;$('sideEmail').textContent=state.user?.email||'';await navigate('dashboard');}
       catch(error){showMessage('companyMessage',friendlyError(error),'error');}finally{setBusy('companySubmit',false,'Crear mi espacio');}
     });
     document.querySelectorAll('[data-page]').forEach(btn=>btn.addEventListener('click',()=>navigate(btn.dataset.page)));
