@@ -1,0 +1,34 @@
+name: SHINKA Engine checks
+
+on:
+  pull_request:
+    paths:
+      - "supabase/functions/shinka-ai-chat/**"
+      - "self-hosted/shinka-engine/**"
+      - "docs/SHINKA-AI-engine.md"
+      - ".github/workflows/shinka-engine-check.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  edge-function:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: Type-check SHINKA AI Edge Function
+        run: deno check supabase/functions/shinka-ai-chat/index.ts
+
+  compose-config:
+    runs-on: ubuntu-latest
+    env:
+      SHINKA_AI_API_KEY: ci-placeholder-not-a-real-secret
+      SHINKA_ENGINE_DOMAIN: ai-engine.example.com
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate Docker Compose configuration
+        run: docker compose -f self-hosted/shinka-engine/compose.yaml config --quiet
