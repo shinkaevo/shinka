@@ -1,29 +1,53 @@
-# SHINKA Engine — despliegue de un modelo propio
+# SHINKA Engine — motor abierto autoalojado
 
-SHINKA separa su producto (memoria, contexto empresarial, controles de acceso, conversaciones y créditos) del motor que genera texto.
+SHINKA separa el producto del motor que genera texto. **SHINKA Core** conserva autenticación, MFA, permisos por empresa, historial, contexto empresarial y créditos. **SHINKA Engine** ejecuta el modelo abierto en una máquina que controla el administrador.
 
-## Configuración del motor
+## Modelo elegido
 
-La función `shinka-ai-chat` acepta cualquier servidor compatible con la API de Chat Completions:
+Primera versión: `openai/gpt-oss-20b`, con licencia Apache 2.0. OpenAI publica sus pesos para descarga y documenta una necesidad aproximada de 16 GB de memoria para la variante 20B. El requisito real depende del backend, longitud del contexto, concurrencia y hardware; para esta configuración recomendamos más margen, idealmente 24 GB o más.
 
-- `SHINKA_AI_BASE_URL`: URL HTTPS base del servidor, normalmente terminada en `/v1`.
-- `SHINKA_AI_API_KEY`: clave privada que autentica SHINKA ante ese servidor.
-- `SHINKA_AI_MODEL`: identificador exacto del modelo servido.
+Referencias:
+- [OpenAI: presentación de gpt-oss](https://openai.com/index/introducing-gpt-oss/)
+- [OpenAI: guía para ejecutar gpt-oss con Transformers](https://developers.openai.com/cookbook/articles/gpt-oss/run-transformers/)
+- [vLLM: modelos compatibles](https://docs.vllm.ai/en/latest/models/supported_models/)
 
-Por compatibilidad, si `SHINKA_AI_BASE_URL` no está definido se usa el endpoint de OpenAI y, si falta `SHINKA_AI_API_KEY`, se acepta temporalmente `OPENAI_API_KEY` como alternativa. Ninguna clave debe colocarse en el frontend, en GitHub ni en los mensajes de chat.
+Los pesos abiertos no equivalen a inferencia gratuita: alguien debe aportar GPU, almacenamiento, electricidad, conectividad y mantenimiento. No es realista ejecutar esta configuración dentro de Supabase Edge Functions o en un Chromebook común.
 
-## Modelo abierto objetivo
+## Servidor listo para desplegar
 
-El objetivo de la primera implementación autoalojada es `openai/gpt-oss-20b`. Sus pesos tienen licencia Apache 2.0, pero ejecutarlo no es gratis: el hardware, el alojamiento, el almacenamiento y la operación pueden tener costo. La guía oficial de despliegue con vLLM estima alrededor de 16 GB de memoria de GPU para el modelo 20B.
+El paquete reproducible está en `self-hosted/shinka-engine/`:
+- `compose.yaml`: vLLM con imagen fijada, modelo gpt-oss-20b, caché persistente, límites iniciales de contexto/concurrencia y comprobación de salud.
+- `Caddyfile`: HTTPS automático y exposición exclusiva de `POST /v1/chat/completions`.
+- `.env.example`: plantilla local de dominio y secreto; el archivo real `.env` está excluido de Git.
+- `README.md`: requisitos, arranque, conexión con Supabase y prueba funcional.
 
-## Servidor de inferencia
+vLLM proporciona una API compatible con OpenAI. Su propia documentación advierte que la opción de API key no protege todas las rutas del servidor, por eso el paquete no publica directamente el puerto 8000 y filtra las rutas con Caddy.
 
-vLLM ofrece un servidor HTTP compatible con `/v1/chat/completions`, que es la interfaz que consume SHINKA. El servidor debe estar desplegado con HTTPS y detrás de un proxy o una capa de autenticación robusta. No se debe exponer directamente a internet una instancia sin protección: la autenticación por API key de vLLM no cubre todos sus endpoints.
+Referencias:
+- [vLLM: servidor compatible con OpenAI y limitaciones de API key](https://docs.vllm.ai/en/latest/serving/online_serving/openai_compatible_server/)
+- [vLLM: despliegue con Docker](https://docs.vllm.ai/en/latest/deployment/docker/)
+- [vLLM: lanzamientos](https://github.com/vllm-project/vllm/releases)
 
-## Lo que ya aporta SHINKA
+## Configuración de SHINKA Edge Function
 
-El modelo no administra directamente el negocio. SHINKA Core conserva la autenticación, la verificación MFA, los permisos por empresa, el contexto agregado, el historial, el registro de uso y la reserva/finalización de créditos. El motor recibe solamente los mensajes y el contexto autorizado.
+El adaptador acepta cualquier servidor HTTPS compatible con Chat Completions mediante estas variables de entorno privadas:
 
-## Estado
+- `SHINKA_AI_BASE_URL=https://TU-DOMINIO/v1`
+- `SHINKA_AI_API_KEY=...`
+- `SHINKA_AI_MODEL=shinka-gpt-oss-20b`
 
-Este cambio prepara el adaptador compatible. No activa por sí solo un modelo autoalojado: hace falta desplegar el servidor GPU y configurar los tres secretos anteriores en Supabase Edge Functions. Hasta entonces, el endpoint predeterminado sigue siendo compatible con la configuración existente de OpenAI.
+Para conservar compatibilidad, si no se define `SHINKA_AI_BASE_URL` la función sigue usando el endpoint Responses de OpenAI existente y acepta `OPENAI_API_KEY` como clave heredada. Para un servidor autoalojado, configura los tres valores anteriores en los secretos de Supabase Edge Functions. Nunca los pongas en el frontend, en GitHub o en una conversación.
+
+El adaptador valida HTTPS, rechaza URL con credenciales embebidas, query o fragmento y normaliza las métricas de uso de tokens para el sistema actual de créditos.
+
+## Estado de implementación
+
+- [x] Separar el motor del producto SHINKA.
+- [x] Añadir adaptador HTTPS configurable para Chat Completions sin romper el modo Responses anterior.
+- [x] Añadir un paquete Docker reproducible con vLLM y gateway HTTPS.
+- [ ] Revisar y fusionar el PR de implementación.
+- [ ] Desplegar el servidor en una máquina GPU compatible bajo administración autorizada.
+- [ ] Configurar los secretos privados en Supabase y desplegar la función.
+- [ ] Ejecutar prueba real de ida y vuelta desde SHINKA.
+
+Este paquete deja la ruta de ejecución preparada, pero no crea una máquina GPU ni activa por sí solo un modelo remoto. La cuenta del servidor, cualquier pago y sus credenciales deben ser gestionados por el adulto administrador.
