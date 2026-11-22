@@ -284,19 +284,29 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
       state.isPlatformDeveloper = false;
       state.developerSimulation = null;
       if (!state.user || !state.company || !state.client) return;
+
+      // La autorización y la carga de la simulación son comprobaciones independientes.
+      // Un fallo al consultar la simulación no debe ocultar el acceso ya autorizado.
       try {
         const { data, error } = await state.client.rpc('is_platform_developer');
         if (error) throw error;
         state.isPlatformDeveloper = data === true;
-        if (!state.isPlatformDeveloper) return;
+      } catch (error) {
+        console.warn('No se pudo verificar el acceso a Developer Mode:', error);
+        state.isPlatformDeveloper = false;
+        return;
+      }
+
+      if (!state.isPlatformDeveloper) return;
+
+      try {
         const { data: simulation, error: simulationError } = await state.client.rpc('get_developer_plan', {
           p_company_id: state.company.id
         });
         if (simulationError) throw simulationError;
         state.developerSimulation = Array.isArray(simulation) ? (simulation[0] || null) : (simulation || null);
       } catch (error) {
-        console.warn('No se pudo cargar Developer Mode:', error);
-        state.isPlatformDeveloper = false;
+        console.warn('Acceso de Developer Mode verificado, pero no se pudo cargar la simulación:', error);
         state.developerSimulation = null;
       }
     }
