@@ -34,7 +34,7 @@ begin
   return query
   select
     cm.user_id,
-    cm.role,
+    cm.role::text,
     coalesce(
       nullif(trim(u.raw_user_meta_data->>'full_name'), ''),
       nullif(trim(u.raw_user_meta_data->>'name'), ''),
@@ -91,7 +91,7 @@ begin
   where cm.company_id = p_company_id
     and cm.user_id = v_user_id;
 
-  if v_actor_role not in ('owner', 'admin') then
+  if coalesce(v_actor_role, '') not in ('owner', 'admin') then
     raise exception 'Solo el propietario o un administrador puede añadir miembros.';
   end if;
 
@@ -206,7 +206,7 @@ begin
   where cm.company_id = p_company_id
     and cm.user_id = v_user_id;
 
-  if v_actor_role not in ('owner', 'admin') then
+  if coalesce(v_actor_role, '') not in ('owner', 'admin') then
     raise exception 'No tienes permiso para administrar el equipo.';
   end if;
 
@@ -271,7 +271,7 @@ begin
   where cm.company_id = p_company_id
     and cm.user_id = v_user_id;
 
-  if v_actor_role not in ('owner', 'admin') then
+  if coalesce(v_actor_role, '') not in ('owner', 'admin') then
     raise exception 'No tienes permiso para administrar el equipo.';
   end if;
 
@@ -344,7 +344,7 @@ begin
   where cm.company_id = new.company_id
     and cm.user_id = v_user_id;
 
-  if v_actor_role not in ('owner', 'admin') then
+  if coalesce(v_actor_role, '') not in ('owner', 'admin') then
     raise exception 'Solo el propietario o un administrador puede añadir miembros.';
   end if;
 
