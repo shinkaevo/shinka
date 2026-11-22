@@ -1102,7 +1102,7 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
         (!canAdd
           ? '<p class="help">' + (maxUsers === null ? 'No se pudo leer el límite max_users del plan. No puedes añadir miembros hasta que esté configurado.' : 'Has alcanzado el límite de miembros de tu plan.') + '</p>'
           : '') +
-        '<p class="help">CORE incluye 2 usuarios, FLOW 5 y NEXUS ofrece miembros ilimitados. El límite incluye al propietario.</p>' +
+        '<p class="help">CORE permite hasta 2 usuarios; FLOW permite hasta 5 usuarios; NEXUS permite usuarios ilimitados. El propietario cuenta dentro del límite.</p>' +
         '</form><div id="teamMessage" class="message" role="status" aria-live="polite"></div></section>';
 
       const addForm = $('addMemberForm');
