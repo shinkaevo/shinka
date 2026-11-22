@@ -1,6 +1,7 @@
 -- SHINKA 2.0: hacer opcional la activación de MFA para owner/admin.
+-- EJECUTAR DESPUÉS de 009_admin_mfa_enforcement.sql.
 -- Reemplaza la política obligatoria de 009 por MFA opt-in:
--- si owner/admin activa un factor verificado, AAL2 pasa a ser obligatorio;
+-- si owner/admin activa un factor TOTP verificado, AAL2 pasa a ser obligatorio;
 -- si no lo activa, puede continuar con AAL1. El UI ofrece "Ahora no".
 
 begin;
@@ -17,6 +18,7 @@ as $function$
     from auth.mfa_factors f
     where f.user_id = (select auth.uid())
       and f.status = 'verified'
+      and f.factor_type = 'totp'
   );
 $function$;
 
