@@ -452,11 +452,32 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
         if (error) throw error;
       }
 
-      const { data: enrolled, error: enrollError } = await state.client.auth.mfa.enroll({
-        factorType: 'totp',
-        friendlyName: 'SHINKA Authenticator'
-      });
-      if (enrollError) throw enrollError;
+      // Supabase exige que el nombre visible del factor sea único por usuario.
+      // Si el nombre principal ya está ocupado por un factor antiguo, prueba
+      // alternativas claras sin obligar a la persona a tocar su configuración.
+      let enrolled = null;
+      let enrollError = null;
+      for (let attempt = 1; attempt <= 5; attempt++) {
+        const friendlyName = attempt === 1
+          ? 'SHINKA Authenticator'
+          : `SHINKA Authenticator ${attempt}`;
+        const result = await state.client.auth.mfa.enroll({
+          factorType: 'totp',
+          friendlyName
+        });
+        if (!result.error) {
+          enrolled = result.data;
+          break;
+        }
+        enrollError = result.error;
+        const message = String(result.error.message || '');
+        if (!/friendly name.*already exists|factor with the friendly name/i.test(message)) {
+          throw result.error;
+        }
+      }
+      if (!enrolled) {
+        throw new Error('Ya existe un autenticador con ese nombre. No se pudo crear otro automáticamente; revisa los factores MFA de tu cuenta.');
+      }
       if (!enrolled?.totp?.qr_code || !enrolled?.totp?.secret) {
         throw new Error('Supabase no devolvió el código QR de configuración. Inténtalo de nuevo.');
       }
