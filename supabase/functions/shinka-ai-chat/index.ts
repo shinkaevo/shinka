@@ -133,6 +133,24 @@ Deno.serve(async (req: Request) => {
     .eq("created_by", user.id).maybeSingle();
   if (conversationError || !conversation) return json({ error: "Esta conversación no existe o no te pertenece." }, 404);
 
+  const { data: addonSubscription, error: addonSubscriptionError } = await admin
+    .from("company_ai_subscriptions")
+    .select("status,current_period_start,current_period_end")
+    .eq("company_id", companyId)
+    .maybeSingle();
+  const periodStart = addonSubscription?.current_period_start
+    ? new Date(addonSubscription.current_period_start).getTime() : 0;
+  const periodEnd = addonSubscription?.current_period_end
+    ? new Date(addonSubscription.current_period_end).getTime() : 0;
+  if (addonSubscriptionError) return json({ error: "No pudimos verificar tu suscripción de SHINKA IA." }, 500);
+  if (!addonSubscription || !["active", "trialing"].includes(addonSubscription.status)
+      || !periodStart || !periodEnd || Date.now() < periodStart || Date.now() >= periodEnd) {
+    return json({
+      error: "Esta empresa necesita una suscripción activa de SHINKA IA. Se contrata por separado de CORE, FLOW y NEXUS.",
+      code: "AI_ADDON_INACTIVE",
+    }, 402);
+  }
+
   // The initial release sends aggregate metrics only, never customer PII.
   const [customers, orders, leads, services, payments] = await Promise.all([
     admin.from("customers").select("id", { count: "exact", head: true }).eq("company_id", companyId),
@@ -246,11 +264,11 @@ Deno.serve(async (req: Request) => {
     }, 402);
   }
 
-  const { error: userMessageError } = await admin.from("ai_messages").insert({
+  const { data: userMessage, error: userMessageError } = await admin.from("ai_messages").insert({
     conversation_id: conversationId, company_id: companyId, user_id: user.id,
     role: "user", content: message,
-  });
-  if (userMessageError) {
+  }).select("id").single();
+  if (userMessageError || !userMessage) {
     await admin.rpc("shinka_ai_finalize_usage", {
       p_request_id: requestId, p_input_tokens: 0, p_output_tokens: 0, p_model: MODEL, p_status: "failed",
     });
@@ -285,12 +303,12 @@ Deno.serve(async (req: Request) => {
     const inputTokens = Math.max(0, Number(usage.input_tokens || 0));
     const outputTokens = Math.max(0, Number(usage.output_tokens || 0));
 
-    const { error: assistantMessageError } = await admin.from("ai_messages").insert({
+    const { data: assistantMessage, error: assistantMessageError } = await admin.from("ai_messages").insert({
       conversation_id: conversationId, company_id: companyId, user_id: user.id,
       role: "assistant", content: answer.slice(0, 20000), model: MODEL,
       input_tokens: inputTokens, output_tokens: outputTokens,
-    });
-    if (assistantMessageError) throw new Error("No pudimos guardar la respuesta de SHINKA IA.");
+    }).select("id").single();
+    if (assistantMessageError || !assistantMessage) throw new Error("No pudimos guardar la respuesta de SHINKA IA.");
 
     const { error: finalizeError } = await admin.rpc("shinka_ai_finalize_usage", {
       p_request_id: requestId, p_input_tokens: inputTokens, p_output_tokens: outputTokens,
@@ -314,6 +332,9 @@ Deno.serve(async (req: Request) => {
       p_request_id: requestId, p_input_tokens: 0, p_output_tokens: 0,
       p_model: MODEL, p_status: "failed",
     });
+    await admin.from("ai_messages").delete()
+      .eq("conversation_id", conversationId).eq("company_id", companyId)
+      .eq("user_id", user.id).eq("role", "user").eq("content", message);
     console.error("SHINKA IA provider failure:", error instanceof Error ? error.message : "unknown");
     return json({
       error: "SHINKA IA no pudo completar la respuesta. Los créditos reservados fueron liberados; inténtalo nuevamente.",
