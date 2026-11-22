@@ -338,7 +338,7 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
       document.querySelectorAll('[data-page="team"]').forEach(btn => btn.classList.toggle('hidden', !canEditCompany()));
       document.querySelectorAll('[data-page="security"]').forEach(btn => btn.classList.toggle('hidden', !canEditCompany()));
       const roleLabel = $('sideRole');
-      if (roleLabel) roleLabel.textContent = ROLE_LABELS[state.role] || 'Acceso limitado';
+      if (roleLabel) roleLabel.textContent = (ROLE_LABELS[state.role] || 'Acceso limitado') + (state.isPlatformDeveloper ? ' · Developer' : '');
     }
 
     async function refreshCompanyPlan() {
