@@ -275,6 +275,7 @@ Deno.serve(async (req: Request) => {
     return json({ error: "No pudimos guardar tu mensaje." }, 500);
   }
 
+  let assistantMessageId: number | null = null;
   try {
     const input = [...history, { role: "user", content: fullPrompt }];
     const aiResponse = await fetch(OPENAI_URL, {
@@ -309,6 +310,7 @@ Deno.serve(async (req: Request) => {
       input_tokens: inputTokens, output_tokens: outputTokens,
     }).select("id").single();
     if (assistantMessageError || !assistantMessage) throw new Error("No pudimos guardar la respuesta de SHINKA IA.");
+    assistantMessageId = assistantMessage.id;
 
     const { error: finalizeError } = await admin.rpc("shinka_ai_finalize_usage", {
       p_request_id: requestId, p_input_tokens: inputTokens, p_output_tokens: outputTokens,
@@ -332,9 +334,10 @@ Deno.serve(async (req: Request) => {
       p_request_id: requestId, p_input_tokens: 0, p_output_tokens: 0,
       p_model: MODEL, p_status: "failed",
     });
-    await admin.from("ai_messages").delete()
-      .eq("conversation_id", conversationId).eq("company_id", companyId)
-      .eq("user_id", user.id).eq("role", "user").eq("content", message);
+    await admin.from("ai_messages").delete().eq("id", userMessage.id).eq("user_id", user.id);
+    if (assistantMessageId !== null) {
+      await admin.from("ai_messages").delete().eq("id", assistantMessageId).eq("user_id", user.id);
+    }
     console.error("SHINKA IA provider failure:", error instanceof Error ? error.message : "unknown");
     return json({
       error: "SHINKA IA no pudo completar la respuesta. Los créditos reservados fueron liberados; inténtalo nuevamente.",
