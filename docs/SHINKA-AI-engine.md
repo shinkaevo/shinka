@@ -45,9 +45,10 @@ El adaptador valida HTTPS, rechaza URL con credenciales embebidas, query o fragm
 - [x] Separar el motor del producto SHINKA.
 - [x] Añadir adaptador HTTPS configurable para Chat Completions sin romper el modo Responses anterior.
 - [x] Añadir un paquete Docker reproducible con vLLM y gateway HTTPS.
-- [ ] Revisar y fusionar el PR de implementación.
+- [x] Revisar y fusionar el PR de implementación (#19).
 - [ ] Desplegar el servidor en una máquina GPU compatible bajo administración autorizada.
-- [ ] Configurar los secretos privados en Supabase y desplegar la función.
+- [x] Desplegar el adaptador de `shinka-ai-chat` en Supabase (versión 4; JWT obligatorio).
+- [ ] Configurar los secretos privados `SHINKA_AI_BASE_URL`, `SHINKA_AI_API_KEY` y `SHINKA_AI_MODEL`.
 - [ ] Ejecutar prueba real de ida y vuelta desde SHINKA.
 
 Este paquete deja la ruta de ejecución preparada, pero no crea una máquina GPU ni activa por sí solo un modelo remoto. La cuenta del servidor, cualquier pago y sus credenciales deben ser gestionados por el adulto administrador.
