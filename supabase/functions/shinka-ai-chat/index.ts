@@ -2,7 +2,8 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 
 const MODEL = Deno.env.get("SHINKA_AI_MODEL") || "gpt-6.2-astra";
-const OPENAI_URL = "https://api.openai.com/v1/responses";
+const AI_BASE_URL = (Deno.env.get("SHINKA_AI_BASE_URL") || "https://api.openai.com/v1").trim().replace(/\\/+$/, "");
+const AI_ENDPOINT = `${AI_BASE_URL}/chat/completions`;
 const MAX_USER_MESSAGE = 6000;
 const MAX_OUTPUT_TOKENS = 4096;
 const APP_ORIGIN = "https://shinkaevo.github.io";
@@ -45,16 +46,12 @@ function keyFromEnv(jsonName: string, legacyNames: string[]): string | null {
 }
 
 function getText(response: any): string {
-  if (typeof response?.output_text === "string" && response.output_text.trim()) {
-    return response.output_text.trim();
+  const content = response?.choices?.[0]?.message?.content;
+  if (typeof content === "string") return content.trim();
+  if (Array.isArray(content)) {
+    return content.map((part: any) => typeof part?.text === "string" ? part.text : "").join("\n").trim();
   }
-  const parts: string[] = [];
-  for (const item of response?.output || []) {
-    for (const part of item?.content || []) {
-      if (part?.type === "output_text" && typeof part.text === "string") parts.push(part.text);
-    }
-  }
-  return parts.join("\n").trim();
+  return "";
 }
 
 function estimateCredits(text: string): number {
@@ -66,11 +63,20 @@ Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return json({ ok: true });
   if (req.method !== "POST") return json({ error: "Método no permitido." }, 405);
 
-  const openAiKey = Deno.env.get("OPENAI_API_KEY");
-  if (!openAiKey) return json({
-    error: "SHINKA IA todavía no está conectada al modelo. Falta configurar la clave privada del proveedor.",
+  const aiApiKey = Deno.env.get("SHINKA_AI_API_KEY") || Deno.env.get("OPENAI_API_KEY");
+  if (!aiApiKey) return json({
+    error: "SHINKA IA todavía no está conectada al motor. Configura SHINKA_AI_API_KEY en los secretos de Edge Functions.",
     code: "AI_PROVIDER_NOT_CONFIGURED",
   }, 503);
+
+  try {
+    const endpointBase = new URL(AI_BASE_URL);
+    if (endpointBase.protocol !== "https:" || endpointBase.username || endpointBase.password || endpointBase.search || endpointBase.hash) {
+      return json({ error: "La dirección del motor debe ser una URL HTTPS válida y no debe contener credenciales." }, 503);
+    }
+  } catch {
+    return json({ error: "La dirección configurada para el motor de SHINKA IA no es válida." }, 503);
+  }
 
   const authHeader = req.headers.get("Authorization") || "";
   if (!authHeader.startsWith("Bearer ")) return json({ error: "Inicia sesión para usar SHINKA IA." }, 401);
@@ -277,17 +283,19 @@ Deno.serve(async (req: Request) => {
 
   let assistantMessageId: number | null = null;
   try {
-    const input = [...history, { role: "user", content: fullPrompt }];
-    const aiResponse = await fetch(OPENAI_URL, {
+    const messages = [
+      { role: "system", content: instructions },
+      ...history,
+      { role: "user", content: fullPrompt },
+    ];
+    const aiResponse = await fetch(AI_ENDPOINT, {
       method: "POST",
-      headers: { Authorization: `Bearer ${openAiKey}`, "Content-Type": "application/json" },
+      headers: { Authorization: `Bearer ${aiApiKey}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         model: MODEL,
-        instructions,
-        input,
-        reasoning: { effort: "max" },
-        max_output_tokens: MAX_OUTPUT_TOKENS,
-        store: false,
+        messages,
+        max_tokens: MAX_OUTPUT_TOKENS,
+        stream: false,
       }),
       signal: AbortSignal.timeout(90000),
     });
@@ -301,8 +309,8 @@ Deno.serve(async (req: Request) => {
     if (!answer) throw new Error("El modelo no devolvió una respuesta de texto.");
 
     const usage = responseData?.usage || {};
-    const inputTokens = Math.max(0, Number(usage.input_tokens || 0));
-    const outputTokens = Math.max(0, Number(usage.output_tokens || 0));
+    const inputTokens = Math.max(0, Number(usage.prompt_tokens ?? usage.input_tokens ?? 0));
+    const outputTokens = Math.max(0, Number(usage.completion_tokens ?? usage.output_tokens ?? 0));
 
     const { data: assistantMessage, error: assistantMessageError } = await admin.from("ai_messages").insert({
       conversation_id: conversationId, company_id: companyId, user_id: user.id,
