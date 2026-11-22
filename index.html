@@ -200,6 +200,8 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
         <button class="nav-item" type="button" data-page="orders"><svg class="ico" aria-hidden="true"><use href="#i-orders"/></svg>Pedidos</button>
         <button class="nav-item" type="button" data-page="finance"><svg class="ico" aria-hidden="true"><use href="#i-finance"/></svg>Finanzas</button>
         <button class="nav-item" type="button" data-page="appearance"><svg class="ico" aria-hidden="true"><use href="#i-appearance"/></svg>Apariencia</button>
+      <button class="nav-item hidden" type="button" data-page="developer"><svg class="ico" aria-hidden="true"><use href="#i-more"/></svg>Developer Mode</button>
+        <button class="nav-item hidden" type="button" data-page="developer"><svg class="ico" aria-hidden="true"><use href="#i-more"/></svg>Developer Mode</button>
       </nav>
       <div class="side-bottom"><div><div class="muted" style="font-size:12.5px">Espacio de trabajo</div><strong id="sideCompany">Empresa</strong></div><div id="sideEmail" class="user-email"></div><div id="sideRole" class="user-email"></div><button class="btn btn-secondary btn-block" id="logoutBtn" type="button"><svg class="ico" aria-hidden="true"><use href="#i-logout"/></svg>Cerrar sesión</button></div>
     </aside>
@@ -246,7 +248,7 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
     const APP_REDIRECT_URL = new URL('.', window.location.href).href;
 
     const $ = (id) => document.getElementById(id);
-    const state = { mode: 'login', user: null, company: null, client: null, page: 'dashboard' };
+    const state = { mode: 'login', user: null, company: null, client: null, page: 'dashboard', isPlatformDeveloper: false, developerSimulation: null };
     const pageMeta = {
       dashboard: ['Dashboard', 'Resumen de tu espacio de trabajo.', 'VISTA GENERAL'],
       customers: ['Clientes', 'Administra los contactos de tu empresa.', 'GESTIÓN COMERCIAL'],
@@ -254,7 +256,8 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
       services: ['Servicios', 'Organiza el catálogo y los precios que ofreces.', 'CATÁLOGO'],
       orders: ['Pedidos', 'Controla los trabajos y sus fechas de entrega.', 'OPERACIONES'],
       finance: ['Finanzas', 'Consulta los pagos registrados de tu empresa.', 'FINANZAS'],
-      appearance: ['Apariencia', 'Personaliza la identidad visual de tu espacio de trabajo.', 'PERSONALIZACIÓN']
+      appearance: ['Apariencia', 'Personaliza la identidad visual de tu espacio de trabajo.', 'PERSONALIZACIÓN'],
+      developer: ['Developer Mode', 'Prueba CORE, FLOW y NEXUS sin realizar pagos.', 'HERRAMIENTAS INTERNAS']
     };
 
     const ROLE_LABELS = {
@@ -272,8 +275,30 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
     function syncRoleNavigation() {
       const financeAllowed = canReadFinance();
       document.querySelectorAll('[data-page="finance"]').forEach(btn => btn.classList.toggle('hidden', !financeAllowed));
+      document.querySelectorAll('[data-page="developer"]').forEach(btn => btn.classList.toggle('hidden', !state.isPlatformDeveloper));
       const roleLabel = $('sideRole');
       if (roleLabel) roleLabel.textContent = ROLE_LABELS[state.role] || 'Acceso limitado';
+    }
+
+    async function refreshDeveloperAccess() {
+      state.isPlatformDeveloper = false;
+      state.developerSimulation = null;
+      if (!state.user || !state.company || !state.client) return;
+      try {
+        const { data, error } = await state.client.rpc('is_platform_developer');
+        if (error) throw error;
+        state.isPlatformDeveloper = data === true;
+        if (!state.isPlatformDeveloper) return;
+        const { data: simulation, error: simulationError } = await state.client.rpc('get_developer_plan', {
+          p_company_id: state.company.id
+        });
+        if (simulationError) throw simulationError;
+        state.developerSimulation = Array.isArray(simulation) ? (simulation[0] || null) : (simulation || null);
+      } catch (error) {
+        console.warn('No se pudo cargar Developer Mode:', error);
+        state.isPlatformDeveloper = false;
+        state.developerSimulation = null;
+      }
     }
 
     function showMessage(id, text, type = 'info') {
@@ -378,6 +403,7 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
       state.company = companies[0];
       const membership = memberships.find(m => m.company_id === state.company.id);
       state.role = membership?.role || 'viewer';
+      await refreshDeveloperAccess();
       syncRoleNavigation();
       applyCompanyAppearance();
       $('sideCompany').textContent = state.company.name;
@@ -393,6 +419,10 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
         showMessage('globalMessage', 'Tu rol no tiene acceso a la sección de Finanzas.', 'error');
         return;
       }
+      if (page === 'developer' && !state.isPlatformDeveloper) {
+        showMessage('globalMessage', 'No tienes acceso a las herramientas de desarrollador.', 'error');
+        return;
+      }
       state.page = page; setNavActive(page); clearMessage('globalMessage'); closeSheet(); syncMore(page); document.title = pageMeta[page][0] + ' – SHINKA'; window.scrollTo(0, 0);
       const [title, desc, pill] = pageMeta[page];
       $('welcomeTitle').textContent = title; $('welcomeDesc').textContent = desc; $('pagePill').textContent = pill;
@@ -406,11 +436,124 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
         if (page === 'orders') await renderOrders();
         if (page === 'finance') await renderFinance();
         if (page === 'appearance') await renderAppearance();
+        if (page === 'developer') await renderDeveloper();
       } catch (error) {
         content.innerHTML = '<div class="empty-state">No se pudo cargar esta sección.</div>';
         showMessage('globalMessage', friendlyError(error), 'error');
       }
     }
+    async function renderDeveloper() {
+      if (!state.isPlatformDeveloper) throw new Error('No tienes acceso a Developer Mode.');
+      const [plansRes, entitlementsRes, simulationRes] = await Promise.all([
+        state.client.from('plan_catalog')
+          .select('plan_code,display_name,description,monthly_price_cents,currency')
+          .eq('is_active', true)
+          .order('display_order', { ascending: true }),
+        state.client.from('plan_entitlements')
+          .select('plan_code,entitlement_key,entitlement_value')
+          .order('plan_code', { ascending: true })
+          .order('entitlement_key', { ascending: true }),
+        state.client.rpc('get_developer_plan', { p_company_id: state.company.id })
+      ]);
+      if (plansRes.error) throw plansRes.error;
+      if (entitlementsRes.error) throw entitlementsRes.error;
+      if (simulationRes.error) throw simulationRes.error;
+
+      const plans = plansRes.data || [];
+      const entitlements = entitlementsRes.data || [];
+      state.developerSimulation = Array.isArray(simulationRes.data)
+        ? (simulationRes.data[0] || null)
+        : (simulationRes.data || null);
+      const activePlan = state.developerSimulation?.simulated_plan_code || null;
+      const expiresAt = state.developerSimulation?.expires_at
+        ? new Date(state.developerSimulation.expires_at).toLocaleString('es-DO', { dateStyle: 'medium', timeStyle: 'short' })
+        : null;
+
+      const cards = plans.map(plan => {
+        const planEntitlements = entitlements.filter(item => item.plan_code === plan.plan_code);
+        const features = planEntitlements.map(item => {
+          const rawValue = item.entitlement_value;
+          const value = rawValue && typeof rawValue === 'object' ? JSON.stringify(rawValue) : String(rawValue);
+          return '<li style="display:flex;justify-content:space-between;gap:12px;padding:5px 0;border-bottom:1px solid var(--line)"><span>' +
+            escapeHTML(item.entitlement_key) + '</span><strong style="text-align:right;overflow-wrap:anywhere">' +
+            escapeHTML(value) + '</strong></li>';
+        }).join('');
+        const price = new Intl.NumberFormat('es-DO', {
+          style: 'currency', currency: plan.currency || 'USD'
+        }).format((Number(plan.monthly_price_cents) || 0) / 100);
+        const selected = activePlan === plan.plan_code;
+        return '<section class="section" style="margin:0;display:flex;flex-direction:column;gap:12px">' +
+          '<div><div style="display:flex;justify-content:space-between;align-items:center;gap:10px"><h2>' + escapeHTML(plan.display_name) +
+          '</h2>' + (selected ? '<span class="badge-status" data-s="completed">Activo en simulación</span>' : '') + '</div>' +
+          '<p>' + escapeHTML(plan.description || '') + '</p><div style="font-size:26px;font-weight:700;margin-top:10px">' +
+          escapeHTML(price) + '<span style="font-size:13px;font-weight:400;color:var(--muted)"> / mes</span></div></div>' +
+          '<details><summary style="cursor:pointer;font-weight:600">Ver capacidades (' +
+          planEntitlements.length + ')</summary><ul style="list-style:none;padding:8px 0 0;margin:0">' +
+          (features || '<li class="muted">Sin capacidades registradas.</li>') + '</ul></details>' +
+          '<button class="btn ' + (selected ? 'btn-secondary' : 'btn-primary') +
+          ' btn-block" type="button" data-developer-plan="' + escapeHTML(plan.plan_code) + '">' +
+          (selected ? 'Renovar simulación por 12 horas' : 'Probar ' + escapeHTML(plan.display_name)) + '</button></section>';
+      }).join('');
+
+      $('pageContent').innerHTML =
+        '<section class="section" style="margin-top:0"><div class="toolbar"><div><h2>Laboratorio de planes</h2>' +
+        '<p>Activa temporalmente un plan para probar SHINKA. No se procesa ningún cobro.</p></div>' +
+        '<span class="badge-status" data-s="' + (activePlan ? 'completed' : 'pending') + '">' +
+        (activePlan ? 'Simulación activa' : 'Sin simulación') + '</span></div>' +
+        (activePlan
+          ? '<p style="margin-top:12px">Plan simulado: <strong>' + escapeHTML(activePlan.toUpperCase()) +
+            '</strong> · Vence: ' + escapeHTML(expiresAt || '—') + '</p>' +
+            '<button class="btn btn-secondary small-btn" type="button" id="clearDeveloperPlan">Terminar simulación</button>'
+          : '<p style="margin-top:12px">Tu suscripción real y el plan guardado en la empresa no se modifican.</p>') +
+        '</section>' +
+        '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr));gap:16px;margin-top:18px">' +
+        (cards || '<section class="section">No hay planes activos en el catálogo.</section>') +
+        '</div>' +
+        '<section class="section"><h2>Importante</h2><p>Esta herramienta crea una simulación privada de 12 horas. No genera pagos, no cambia la suscripción real y no activa todavía límites de funciones en módulos que aún no estén conectados al sistema de capacidades.</p>' +
+        '<div id="developerMessage" class="message" role="status" aria-live="polite"></div></section>';
+
+      document.querySelectorAll('[data-developer-plan]').forEach(button => {
+        button.addEventListener('click', async () => {
+          const planCode = button.dataset.developerPlan;
+          button.disabled = true;
+          button.textContent = 'Activando…';
+          try {
+            const { error } = await state.client.rpc('set_developer_plan', {
+              p_company_id: state.company.id,
+              p_plan_code: planCode
+            });
+            if (error) throw error;
+            await refreshDeveloperAccess();
+            await renderDeveloper();
+            showMessage('globalMessage', 'Simulación ' + planCode.toUpperCase() + ' activada por 12 horas. No se realizó ningún cobro.', 'success');
+          } catch (error) {
+            showMessage('globalMessage', friendlyError(error), 'error');
+            button.disabled = false;
+            button.textContent = 'No se pudo activar';
+          }
+        });
+      });
+
+      $('clearDeveloperPlan')?.addEventListener('click', async event => {
+        const button = event.currentTarget;
+        button.disabled = true;
+        button.textContent = 'Terminando…';
+        try {
+          const { error } = await state.client.rpc('clear_developer_plan', {
+            p_company_id: state.company.id
+          });
+          if (error) throw error;
+          await refreshDeveloperAccess();
+          await renderDeveloper();
+          showMessage('globalMessage', 'Simulación finalizada. Tu plan real no cambió.', 'success');
+        } catch (error) {
+          showMessage('globalMessage', friendlyError(error), 'error');
+          button.disabled = false;
+          button.textContent = 'No se pudo terminar';
+        }
+      });
+    }
+
     async function getCount(table) {
       const { count, error } = await state.client.from(table).select('id', {count:'exact', head:true}).eq('company_id', state.company.id);
       if (error) throw error; return count ?? 0;
@@ -428,7 +571,7 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
     }
     const sheet = $('moreSheet'), scrim = $('scrim');
     function closeSheet() { sheet.classList.remove('open'); scrim.classList.remove('open'); $('moreBtn').setAttribute('aria-expanded', 'false'); }
-    function syncMore(page) { $('moreBtn').classList.toggle('active', ['leads', 'services', 'appearance'].includes(page)); }
+    function syncMore(page) { $('moreBtn').classList.toggle('active', ['leads', 'services', 'appearance', 'developer'].includes(page)); }
     $('moreBtn').addEventListener('click', () => { const o = !sheet.classList.contains('open'); sheet.classList.toggle('open', o); scrim.classList.toggle('open', o); $('moreBtn').setAttribute('aria-expanded', String(o)); });
     scrim.addEventListener('click', closeSheet);
     document.addEventListener('keydown', e => { if (e.key === 'Escape') closeSheet(); });
@@ -763,7 +906,7 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
     $('logoutBtn').addEventListener('click',async()=>{const {error}=await state.client.auth.signOut();if(error){alert(friendlyError(error));return;}state.user=null;state.company=null;state.role=null;syncRoleNavigation();applyCompanyAppearance();$('authForm').reset();setMode('login');showView('auth');});
 
     (async function boot(){
-      try{initClient();const {data:{session},error}=await state.client.auth.getSession();if(error)throw error;if(session?.user)await loadWorkspace(session.user);else showView('auth');state.client.auth.onAuthStateChange((event)=>{if(event==='SIGNED_OUT'){state.user=null;state.company=null;state.role=null;syncRoleNavigation();applyCompanyAppearance();showView('auth');}});}
+      try{initClient();const {data:{session},error}=await state.client.auth.getSession();if(error)throw error;if(session?.user)await loadWorkspace(session.user);else showView('auth');state.client.auth.onAuthStateChange((event)=>{if(event==='SIGNED_OUT'){state.user=null;state.company=null;state.role=null;state.isPlatformDeveloper=false;state.developerSimulation=null;syncRoleNavigation();applyCompanyAppearance();showView('auth');}});}
       catch(error){showView('auth');showMessage('authMessage',friendlyError(error),'error');}
     })();
   </script>
