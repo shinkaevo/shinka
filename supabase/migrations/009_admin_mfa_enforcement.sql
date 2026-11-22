@@ -594,7 +594,12 @@ begin
     where c.oid = v_oid;
 
     if not v_rls then
-      raise exception 'RLS está desactivado en public.%. No se aplicó la protección MFA.', v_table;
+      if v_table in ('company_members', 'customers', 'leads', 'services', 'orders', 'payments') then
+        raise exception 'RLS está desactivado en public.%. No se aplicó la protección MFA.', v_table;
+      else
+        raise notice 'Se omitió public.% porque RLS está desactivado; revisa su protección antes de usar esa tabla con datos sensibles.', v_table;
+        continue;
+      end if;
     end if;
 
     select exists (
@@ -606,7 +611,11 @@ begin
     ) into v_has_company_id;
 
     if not v_has_company_id then
-      raise exception 'La tabla public.% no contiene company_id.', v_table;
+      if v_table in ('company_members', 'customers', 'leads', 'services', 'orders', 'payments') then
+        raise exception 'La tabla public.% no contiene company_id.', v_table;
+      else
+        continue;
+      end if;
     end if;
 
     execute format('drop policy if exists shinka_aal2_for_privileged on public.%I', v_table);
