@@ -41,7 +41,7 @@ En los secretos de Supabase Edge Functions del proyecto, configura:
 - `SHINKA_AI_API_KEY=` el mismo secreto del archivo local `.env`
 - `SHINKA_AI_MODEL=shinka-gpt-oss-20b`
 
-No agregues estos valores al frontend ni a GitHub. Después despliega la versión de `shinka-ai-chat` que contiene el adaptador configurable. La función conserva autenticación, MFA, aislamiento por empresa, historial y créditos; el servidor GPU solo recibe el contexto que SHINKA autoriza.
+No agregues estos valores al frontend ni a GitHub. **El adaptador de `shinka-ai-chat` ya está desplegado en Supabase como versión 4**; no hace falta volver a desplegarlo para conectar el servidor. Cuando se agreguen estos secretos, la función empezará a llamar al motor configurado. Mientras `SHINKA_AI_BASE_URL` no esté definido, se mantiene el modo compatible con OpenAI y seguirá dependiendo de la disponibilidad de esa API. La función conserva autenticación, MFA, aislamiento por empresa, historial y créditos; el servidor GPU solo recibe el contexto que SHINKA autoriza.
 
 ## Prueba del endpoint
 
