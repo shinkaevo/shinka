@@ -200,7 +200,7 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
         </div>
         <p class="help">Si no puedes escanearlo, introduce esta clave manualmente en tu aplicación:</p>
         <code id="mfaSecret" style="display:block;overflow-wrap:anywhere;padding:12px;border-radius:10px;background:var(--surface-2);margin:8px 0 16px"></code>
-        <p class="help">No compartas este QR ni la clave. Guárdalos solo en tu autenticador. Configura un segundo dispositivo de respaldo antes de continuar.</p>
+        <p class="help">No compartas este QR ni la clave. Guárdalos solo en tu autenticador. Recomendado: escanea el mismo QR también en un segundo dispositivo seguro como respaldo.</p>
         <p class="help"><strong>2.</strong> Escribe el código de seis dígitos que aparece en tu aplicación.</p>
       </div>
       <form id="mfaForm">
@@ -496,10 +496,10 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
           if (error) throw error;
         }
         const user = mfaGate.user;
+        await loadWorkspace(user);
         mfaGate.user = null;
         mfaGate.mode = null;
         mfaGate.factorId = null;
-        await loadWorkspace(user);
       } catch (error) {
         showMessage('mfaMessage', friendlyError(error), 'error');
       } finally {
