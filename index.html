@@ -207,6 +207,8 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
         <div class="field"><label for="mfaCode">Código de verificación</label><input id="mfaCode" name="code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" minlength="6" placeholder="000000" required></div>
         <button class="btn btn-primary btn-block" id="mfaSubmit" type="submit">Verificar y continuar</button>
       </form>
+      <button class="btn btn-secondary btn-block hidden" id="mfaSkipBtn" type="button">Ahora no, continuar sin 2FA</button>
+      <p id="mfaSkipHelp" class="help hidden">Puedes activar la verificación en dos pasos más adelante. Sin ella, tu cuenta tendrá menos protección.</p>
       <div id="mfaMessage" class="message" role="status" aria-live="polite"></div>
       <button class="btn btn-secondary btn-block" id="mfaLogoutBtn" type="button">Cerrar sesión</button>
     </section>
@@ -386,6 +388,8 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
         ? 'Como propietario o administrador, debes activar la verificación en dos pasos antes de entrar.'
         : 'Abre tu aplicación autenticadora e introduce el código actual para continuar.';
       $('mfaSetupBlock').classList.toggle('hidden', !setup);
+      $('mfaSkipBtn').classList.toggle('hidden', !setup);
+      $('mfaSkipHelp').classList.toggle('hidden', !setup);
       $('mfaSubmit').textContent = setup ? 'Activar protección y continuar' : 'Verificar y continuar';
       if (setup) {
         $('mfaQr').src = factor.totp.qr_code;
@@ -425,9 +429,16 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
       const verifiedTotp = (factors?.totp || []).filter(factor => factor.status === 'verified');
 
       if (verifiedTotp.length) {
+        try { localStorage.removeItem('shinka_mfa_skipped_' + user.id); } catch (error) {}
         showMfaScreen('challenge', user, verifiedTotp[0]);
         return true;
       }
+
+      // Si la persona decidió omitir la configuración en este navegador,
+      // se permite continuar porque la política de base de datos es opt-in.
+      try {
+        if (localStorage.getItem('shinka_mfa_skipped_' + user.id) === '1') return false;
+      } catch (error) {}
 
       // Limpia configuraciones no verificadas abandonadas para emitir un QR nuevo.
       for (const pending of (factors?.totp || []).filter(factor => factor.status !== 'verified')) {
@@ -497,6 +508,7 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
         }
         const user = mfaGate.user;
         await loadWorkspace(user);
+        try { localStorage.removeItem('shinka_mfa_skipped_' + user.id); } catch (error) {}
         mfaGate.user = null;
         mfaGate.mode = null;
         mfaGate.factorId = null;
@@ -504,6 +516,23 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
         showMessage('mfaMessage', friendlyError(error), 'error');
       } finally {
         setBusy('mfaSubmit', false, mfaGate.mode === 'enroll' ? 'Activar protección y continuar' : 'Verificar y continuar');
+      }
+    });
+    $('mfaSkipBtn').addEventListener('click', async () => {
+      const user = mfaGate.user;
+      if (!user?.id) return;
+      try { localStorage.setItem('shinka_mfa_skipped_' + user.id, '1'); } catch (error) {}
+      clearMessage('mfaMessage');
+      setBusy('mfaSkipBtn', true, 'Ahora no, continuar sin 2FA');
+      try {
+        await loadWorkspace(user);
+        mfaGate.user = null;
+        mfaGate.mode = null;
+        mfaGate.factorId = null;
+      } catch (error) {
+        showMessage('mfaMessage', friendlyError(error), 'error');
+      } finally {
+        setBusy('mfaSkipBtn', false, 'Ahora no, continuar sin 2FA');
       }
     });
     $('mfaLogoutBtn').addEventListener('click', leaveMfaGate);
