@@ -756,6 +756,10 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
         <div class="two-col ap">
           <div class="stack">
             ${canEdit ? '' : '<div class="message show info">Solo los propietarios y administradores pueden guardar cambios en la empresa. Aun así puedes cambiar el modo de pantalla.</div>'}
+            <section class="section"><h2>Nombre de la empresa</h2><p>Este nombre aparece en la navegación y en los espacios de trabajo.</p>
+              <form id="companyNameForm"><div class="field"><label for="companyDisplayName">Nombre comercial</label><input id="companyDisplayName" name="name" type="text" maxlength="120" minlength="2" required value="${escapeHTML(c.name)}"${dis}></div>
+              <button class="btn btn-secondary small-btn" type="submit"${dis}>Guardar nombre</button></form>
+            </section>
             <section class="section"><h2>Logotipo</h2><p>PNG, JPG o WebP de hasta 2 MB. Se ajusta sin deformarse.</p>
               <div class="logo-row"><div class="logo-tile" id="apTile"><div class="brand"><span class="brand-mark"></span></div></div>
                 <div class="stack-sm"><label class="btn btn-secondary small-btn file-btn">Subir logotipo<input id="companyLogo" type="file" accept="image/png,image/jpeg,image/webp"${dis}></label>
@@ -775,6 +779,40 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
               <div class="pv-row"><span class="pv-btn">Guardar</span><span class="pv-tag">Estado</span><span class="pv-link">Ver detalle</span></div></div></div></div></aside>
         </div>`;
       const pv = $('apPreview'), msg = (t, k) => showMessage('appearanceMessage', t, k);
+      const companyNameForm = $('companyNameForm');
+      if (companyNameForm) companyNameForm.addEventListener('submit', async event => {
+        event.preventDefault();
+        if (!canEdit) return;
+        const input = $('companyDisplayName');
+        const nextName = String(input.value || '').trim().replace(/\\s+/g, ' ');
+        if (nextName.length < 2 || nextName.length > 120) {
+          msg('El nombre debe tener entre 2 y 120 caracteres.', 'error');
+          return;
+        }
+        const button = companyNameForm.querySelector('button[type="submit"]');
+        button.disabled = true;
+        button.textContent = 'Guardando…';
+        try {
+          const { data, error } = await state.client.from('companies')
+            .update({ name: nextName }).eq('id', c.id).select('id,name');
+          if (error) throw error;
+          if (!data || !data.length) throw new Error('No tienes permiso para cambiar el nombre de esta empresa.');
+          const savedName = data[0].name || nextName;
+          state.company = { ...state.company, name: savedName };
+          c.name = savedName;
+          $('sideCompany').textContent = savedName;
+          applyCompanyAppearance();
+          const previewTitle = pv.querySelector('.pv-main>b');
+          if (previewTitle) previewTitle.textContent = savedName;
+          paint();
+          msg('Nombre de la empresa actualizado correctamente.', 'success');
+        } catch (error) {
+          msg(friendlyError(error), 'error');
+        } finally {
+          button.disabled = false;
+          button.textContent = 'Guardar nombre';
+        }
+      });
       const norm = s => { s = String(s).trim(); if (s[0] !== '#') s = '#' + s; return hex(s) ? s.toLowerCase() : null; };
       $('presets').innerHTML = PRESETS.map((p, i) => `<button class="preset" type="button" data-p="${i}"${dis}><span class="dots">${['bg', 'primary', 'accent'].map(k => `<i style="background:${p.v[k]}"></i>`).join('')}</span>${p.n}</button>`).join('');
       $('swatches').innerHTML = FIELDS.map(([k, l]) => `<div class="sw"><label for="c_${k}">${l}</label><div class="sw-in"><input type="color" id="c_${k}" aria-label="${l}"${dis}><input type="text" id="h_${k}" maxlength="7" spellcheck="false" autocomplete="off" aria-label="${l} en HEX"${dis}></div></div>`).join('');
