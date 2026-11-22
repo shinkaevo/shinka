@@ -36,8 +36,7 @@ as $function$
     else not exists (
       select 1
       from public.company_members cm
-      where cm.company_id = p_company_id
-        and cm.user_id = (select auth.uid())
+      where cm.user_id = (select auth.uid())
         and cm.role in ('owner', 'admin')
     )
   end;
