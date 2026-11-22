@@ -575,12 +575,18 @@ begin
     'leads',
     'services',
     'orders',
-    'payments'
+    'payments',
+    'activity_logs',
+    'ai_usage',
+    'subscriptions',
+    'billing_events',
+    'usage_ledger',
+    'developer_plan_sessions'
   ]
   loop
     v_oid := to_regclass(format('public.%I', v_table));
     if v_oid is null then
-      raise exception 'No existe public.%.', v_table;
+      continue;
     end if;
 
     select c.relrowsecurity into v_rls
