@@ -784,7 +784,7 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
         event.preventDefault();
         if (!canEdit) return;
         const input = $('companyDisplayName');
-        const nextName = String(input.value || '').trim().replace(/\\s+/g, ' ');
+        const nextName = String(input.value || '').trim().replace(/\s+/g, ' ');
         if (nextName.length < 2 || nextName.length > 120) {
           msg('El nombre debe tener entre 2 y 120 caracteres.', 'error');
           return;
