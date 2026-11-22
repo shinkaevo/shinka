@@ -188,6 +188,30 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
     </section>
   </main>
 
+  <main id="mfaView" class="shell hidden">
+    <section class="auth-card">
+      <div class="topline"><div class="brand"><span class="brand-mark" role="img" aria-label="SHINKA"></span><span class="brand-word" aria-hidden="true"></span><span class="brand-name"></span></div><span class="pill">SEGURIDAD DE LA CUENTA</span></div>
+      <h1 id="mfaTitle">Verificación en dos pasos</h1>
+      <p class="desc" id="mfaDesc">Protege tu cuenta antes de entrar a SHINKA.</p>
+      <div id="mfaSetupBlock" class="hidden">
+        <p class="help">1. Abre una aplicación autenticadora en tu teléfono y escanea este código QR.</p>
+        <div style="display:flex;justify-content:center;padding:14px;background:#fff;border:1px solid var(--line);border-radius:14px;margin:14px auto;max-width:240px">
+          <img id="mfaQr" alt="Código QR para configurar la autenticación en dos pasos" style="width:200px;height:200px;object-fit:contain">
+        </div>
+        <p class="help">Si no puedes escanearlo, introduce esta clave manualmente en tu aplicación:</p>
+        <code id="mfaSecret" style="display:block;overflow-wrap:anywhere;padding:12px;border-radius:10px;background:var(--surface-2);margin:8px 0 16px"></code>
+        <p class="help">No compartas este QR ni la clave. Guárdalos solo en tu autenticador. Recomendado: escanea el mismo QR también en un segundo dispositivo seguro como respaldo.</p>
+        <p class="help"><strong>2.</strong> Escribe el código de seis dígitos que aparece en tu aplicación.</p>
+      </div>
+      <form id="mfaForm">
+        <div class="field"><label for="mfaCode">Código de verificación</label><input id="mfaCode" name="code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" minlength="6" placeholder="000000" required></div>
+        <button class="btn btn-primary btn-block" id="mfaSubmit" type="submit">Verificar y continuar</button>
+      </form>
+      <div id="mfaMessage" class="message" role="status" aria-live="polite"></div>
+      <button class="btn btn-secondary btn-block" id="mfaLogoutBtn" type="button">Cerrar sesión</button>
+    </section>
+  </main>
+
   <main id="appView" class="app hidden">
     <header class="mbar"><div class="brand"><span class="brand-mark" role="img" aria-label="SHINKA"></span><span class="brand-word" aria-hidden="true"></span><span class="brand-name"></span></div><small class="js-company"></small></header>
     <aside class="sidebar">
@@ -252,6 +276,7 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
 
     const $ = (id) => document.getElementById(id);
     const state = { mode: 'login', user: null, company: null, client: null, page: 'dashboard', isPlatformDeveloper: false, developerSimulation: null, effectivePlanCode: null, planEntitlements: {} };
+    const mfaGate = { user: null, mode: null, factorId: null };
     const pageMeta = {
       dashboard: ['Dashboard', 'Resumen de tu espacio de trabajo.', 'VISTA GENERAL'],
       customers: ['Clientes', 'Administra los contactos de tu empresa.', 'GESTIÓN COMERCIAL'],
@@ -345,8 +370,144 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
     function showView(name) {
       $('authView').classList.toggle('hidden', name !== 'auth');
       $('onboardView').classList.toggle('hidden', name !== 'onboard');
+      $('mfaView').classList.toggle('hidden', name !== 'mfa');
       $('appView').classList.toggle('hidden', name !== 'app');
     }
+    function showMfaScreen(mode, user, factor = null) {
+      mfaGate.user = user;
+      mfaGate.mode = mode;
+      mfaGate.factorId = factor?.id || null;
+      $('mfaMessage').textContent = '';
+      $('mfaMessage').className = 'message';
+      $('mfaCode').value = '';
+      const setup = mode === 'enroll';
+      $('mfaTitle').textContent = setup ? 'Protege tu cuenta' : 'Confirma que eres tú';
+      $('mfaDesc').textContent = setup
+        ? 'Como propietario o administrador, debes activar la verificación en dos pasos antes de entrar.'
+        : 'Abre tu aplicación autenticadora e introduce el código actual para continuar.';
+      $('mfaSetupBlock').classList.toggle('hidden', !setup);
+      $('mfaSubmit').textContent = setup ? 'Activar protección y continuar' : 'Verificar y continuar';
+      if (setup) {
+        $('mfaQr').src = factor.totp.qr_code;
+        $('mfaSecret').textContent = factor.totp.secret;
+      } else {
+        $('mfaQr').removeAttribute('src');
+        $('mfaSecret').textContent = '';
+      }
+      showView('mfa');
+      $('mfaCode').focus();
+    }
+
+    async function requirePrivilegedMfa(user) {
+      if (!user?.id || !state.client) return false;
+
+      let required = false;
+      const check = await state.client.rpc('shinka_requires_admin_mfa');
+      if (!check.error) {
+        required = check.data === true;
+      } else if (/PGRST202|schema cache|could not find the function|function .* does not exist/i.test(check.error.message || '')) {
+        // Compatibilidad durante el despliegue: antes de instalar la migración 009.
+        const { data, error } = await state.client.from('company_members').select('role').eq('user_id', user.id);
+        if (error) throw error;
+        required = (data || []).some(row => ['owner', 'admin'].includes(row.role));
+      } else {
+        throw check.error;
+      }
+
+      if (!required) return false;
+
+      const { data: assurance, error: assuranceError } = await state.client.auth.mfa.getAuthenticatorAssuranceLevel();
+      if (assuranceError) throw assuranceError;
+      if (assurance?.currentLevel === 'aal2') return false;
+
+      const { data: factors, error: factorsError } = await state.client.auth.mfa.listFactors();
+      if (factorsError) throw factorsError;
+      const verifiedTotp = (factors?.totp || []).filter(factor => factor.status === 'verified');
+
+      if (verifiedTotp.length) {
+        showMfaScreen('challenge', user, verifiedTotp[0]);
+        return true;
+      }
+
+      // Limpia configuraciones no verificadas abandonadas para emitir un QR nuevo.
+      for (const pending of (factors?.totp || []).filter(factor => factor.status !== 'verified')) {
+        const { error } = await state.client.auth.mfa.unenroll({ factorId: pending.id });
+        if (error) throw error;
+      }
+
+      const { data: enrolled, error: enrollError } = await state.client.auth.mfa.enroll({
+        factorType: 'totp',
+        friendlyName: 'SHINKA Authenticator'
+      });
+      if (enrollError) throw enrollError;
+      if (!enrolled?.totp?.qr_code || !enrolled?.totp?.secret) {
+        throw new Error('Supabase no devolvió el código QR de configuración. Inténtalo de nuevo.');
+      }
+      showMfaScreen('enroll', user, enrolled);
+      return true;
+    }
+
+    async function leaveMfaGate() {
+      if (state.client) {
+        const { error } = await state.client.auth.signOut();
+        if (error) {
+          showMessage('mfaMessage', friendlyError(error), 'error');
+          return;
+        }
+      }
+      mfaGate.user = null;
+      mfaGate.mode = null;
+      mfaGate.factorId = null;
+      state.user = null;
+      state.company = null;
+      state.role = null;
+      state.effectivePlanCode = null;
+      state.planEntitlements = {};
+      state.developerSimulation = null;
+      state.isPlatformDeveloper = false;
+      showView('auth');
+      setMode('login');
+    }
+
+    $('mfaForm').addEventListener('submit', async event => {
+      event.preventDefault();
+      clearMessage('mfaMessage');
+      const code = $('mfaCode').value.replace(/\D/g, '');
+      if (!/^\d{6}$/.test(code)) {
+        showMessage('mfaMessage', 'Introduce el código de seis dígitos de tu aplicación.', 'error');
+        return;
+      }
+      setBusy('mfaSubmit', true, mfaGate.mode === 'enroll' ? 'Activar protección y continuar' : 'Verificar y continuar');
+      try {
+        if (mfaGate.mode === 'enroll') {
+          const { data: challenge, error: challengeError } = await state.client.auth.mfa.challenge({ factorId: mfaGate.factorId });
+          if (challengeError) throw challengeError;
+          const { error: verifyError } = await state.client.auth.mfa.verify({
+            factorId: mfaGate.factorId,
+            challengeId: challenge.id,
+            code
+          });
+          if (verifyError) throw verifyError;
+        } else {
+          const { error } = await state.client.auth.mfa.challengeAndVerify({
+            factorId: mfaGate.factorId,
+            code
+          });
+          if (error) throw error;
+        }
+        const user = mfaGate.user;
+        await loadWorkspace(user);
+        mfaGate.user = null;
+        mfaGate.mode = null;
+        mfaGate.factorId = null;
+      } catch (error) {
+        showMessage('mfaMessage', friendlyError(error), 'error');
+      } finally {
+        setBusy('mfaSubmit', false, mfaGate.mode === 'enroll' ? 'Activar protección y continuar' : 'Verificar y continuar');
+      }
+    });
+    $('mfaLogoutBtn').addEventListener('click', leaveMfaGate);
+
     function setMode(mode) {
       state.mode = mode; const signup = mode === 'signup';
       $('loginTab').classList.toggle('active', !signup); $('signupTab').classList.toggle('active', signup);
@@ -1201,23 +1362,23 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
           const fullName=$('fullName').value.trim();if(!fullName)throw new Error('Escribe tu nombre completo.');if(password.length<12)throw new Error('Usa una contraseña de al menos 12 caracteres.');
           const {data,error}=await state.client.auth.signUp({email,password,options:{data:{full_name:fullName},emailRedirectTo:APP_REDIRECT_URL}});if(error)throw error;
           if(!data.session){showMessage('authMessage','Cuenta registrada. Abre el correo más reciente y confirma la dirección. Después vuelve a esta página e inicia sesión.','success');$('resendBtn').classList.remove('hidden');}
-          else await loadWorkspace(data.user);
+          else { if(await requirePrivilegedMfa(data.user)) return; await loadWorkspace(data.user); }
         }else{
-          const {data,error}=await state.client.auth.signInWithPassword({email,password});if(error)throw error;await loadWorkspace(data.user);
+          const {data,error}=await state.client.auth.signInWithPassword({email,password});if(error)throw error;if(await requirePrivilegedMfa(data.user))return;await loadWorkspace(data.user);
         }
       }catch(error){showMessage('authMessage',friendlyError(error),'error');if(/Email not confirmed/i.test(error?.message||''))$('resendBtn').classList.remove('hidden');}
       finally{setBusy('authSubmit',false,state.mode==='signup'?'Crear cuenta':'Entrar a mi espacio');}
     });
     $('companyForm').addEventListener('submit',async event=>{
       event.preventDefault();clearMessage('companyMessage');setBusy('companySubmit',true);const name=$('companyName').value.trim();const currency=$('currency').value;
-      try{const {data,error}=await state.client.rpc('create_company',{p_name:name,p_currency:currency});if(error)throw error;const {data:companies,error:fetchError}=await fetchCompanies(q=>q.eq('id',data).limit(1));if(fetchError)throw fetchError;if(!companies?.length)throw new Error('La empresa se creó, pero no pudimos cargarla. Cierra sesión e inicia sesión de nuevo.');state.company=companies[0];state.role='owner';await refreshDeveloperAccess();syncRoleNavigation();applyCompanyAppearance();$('sideCompany').textContent=state.company.name;$('sideEmail').textContent=state.user?.email||'';await navigate('dashboard');}
+      try{const {data,error}=await state.client.rpc('create_company',{p_name:name,p_currency:currency});if(error)throw error;if(await requirePrivilegedMfa(state.user))return;const {data:companies,error:fetchError}=await fetchCompanies(q=>q.eq('id',data).limit(1));if(fetchError)throw fetchError;if(!companies?.length)throw new Error('La empresa se creó, pero no pudimos cargarla. Cierra sesión e inicia sesión de nuevo.');state.company=companies[0];state.role='owner';syncRoleNavigation();applyCompanyAppearance();$('sideCompany').textContent=state.company.name;$('sideEmail').textContent=state.user?.email||'';await refreshDeveloperAccess();await navigate('dashboard');}
       catch(error){showMessage('companyMessage',friendlyError(error),'error');}finally{setBusy('companySubmit',false,'Crear mi espacio');}
     });
     document.querySelectorAll('[data-page]').forEach(btn=>btn.addEventListener('click',()=>navigate(btn.dataset.page)));
     $('logoutBtn').addEventListener('click',async()=>{const {error}=await state.client.auth.signOut();if(error){alert(friendlyError(error));return;}state.user=null;state.company=null;state.role=null;state.effectivePlanCode=null;state.planEntitlements={};state.developerSimulation=null;state.isPlatformDeveloper=false;syncRoleNavigation();applyCompanyAppearance();$('authForm').reset();setMode('login');showView('auth');});
 
     (async function boot(){
-      try{initClient();const {data:{session},error}=await state.client.auth.getSession();if(error)throw error;if(session?.user)await loadWorkspace(session.user);else showView('auth');state.client.auth.onAuthStateChange((event)=>{if(event==='SIGNED_OUT'){state.user=null;state.company=null;state.role=null;state.isPlatformDeveloper=false;state.developerSimulation=null;syncRoleNavigation();applyCompanyAppearance();showView('auth');}});}
+      try{initClient();const {data:{session},error}=await state.client.auth.getSession();if(error)throw error;if(session?.user){if(!(await requirePrivilegedMfa(session.user)))await loadWorkspace(session.user);}else showView('auth');state.client.auth.onAuthStateChange((event)=>{if(event==='SIGNED_OUT'){mfaGate.user=null;mfaGate.mode=null;mfaGate.factorId=null;state.user=null;state.company=null;state.role=null;state.isPlatformDeveloper=false;state.developerSimulation=null;syncRoleNavigation();applyCompanyAppearance();showView('auth');}});}
       catch(error){showView('auth');showMessage('authMessage',friendlyError(error),'error');}
     })();
   </script>
