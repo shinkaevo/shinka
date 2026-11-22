@@ -3,7 +3,8 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 
 const MODEL = Deno.env.get("SHINKA_AI_MODEL") || "gpt-6.2-astra";
 const AI_BASE_URL = (Deno.env.get("SHINKA_AI_BASE_URL") || "https://api.openai.com/v1").trim().replace(/\/+$/, "");
-const AI_ENDPOINT = `${AI_BASE_URL}/chat/completions`;
+const OPENAI_RESPONSES_MODE = AI_BASE_URL === "https://api.openai.com/v1";
+const AI_ENDPOINT = `${AI_BASE_URL}${OPENAI_RESPONSES_MODE ? "/responses" : "/chat/completions"}`;
 const MAX_USER_MESSAGE = 6000;
 const MAX_OUTPUT_TOKENS = 4096;
 const APP_ORIGIN = "https://shinkaevo.github.io";
@@ -46,12 +47,21 @@ function keyFromEnv(jsonName: string, legacyNames: string[]): string | null {
 }
 
 function getText(response: any): string {
-  const content = response?.choices?.[0]?.message?.content;
-  if (typeof content === "string") return content.trim();
-  if (Array.isArray(content)) {
-    return content.map((part: any) => typeof part?.text === "string" ? part.text : "").join("\n").trim();
+  if (typeof response?.output_text === "string" && response.output_text.trim()) {
+    return response.output_text.trim();
   }
-  return "";
+  const chatContent = response?.choices?.[0]?.message?.content;
+  if (typeof chatContent === "string") return chatContent.trim();
+  if (Array.isArray(chatContent)) {
+    return chatContent.map((part: any) => typeof part?.text === "string" ? part.text : "").join("\n").trim();
+  }
+  const parts: string[] = [];
+  for (const item of response?.output || []) {
+    for (const part of item?.content || []) {
+      if (part?.type === "output_text" && typeof part.text === "string") parts.push(part.text);
+    }
+  }
+  return parts.join("\n").trim();
 }
 
 function estimateCredits(text: string): number {
@@ -283,20 +293,30 @@ Deno.serve(async (req: Request) => {
 
   let assistantMessageId: number | null = null;
   try {
+    const input = [...history, { role: "user", content: fullPrompt }];
     const messages = [
       { role: "system", content: instructions },
-      ...history,
-      { role: "user", content: fullPrompt },
+      ...input,
     ];
+    const requestBody = OPENAI_RESPONSES_MODE
+      ? {
+          model: MODEL,
+          instructions,
+          input,
+          reasoning: { effort: "max" },
+          max_output_tokens: MAX_OUTPUT_TOKENS,
+          store: false,
+        }
+      : {
+          model: MODEL,
+          messages,
+          max_tokens: MAX_OUTPUT_TOKENS,
+          stream: false,
+        };
     const aiResponse = await fetch(AI_ENDPOINT, {
       method: "POST",
       headers: { Authorization: `Bearer ${aiApiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: MODEL,
-        messages,
-        max_tokens: MAX_OUTPUT_TOKENS,
-        stream: false,
-      }),
+      body: JSON.stringify(requestBody),
       signal: AbortSignal.timeout(90000),
     });
 
