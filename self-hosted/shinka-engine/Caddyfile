@@ -1,0 +1,14 @@
+{$SHINKA_ENGINE_DOMAIN} {
+  @chat {
+    method POST
+    path /v1/chat/completions
+  }
+
+  handle @chat {
+    reverse_proxy vllm:8000
+  }
+
+  handle {
+    respond "Not found" 404
+  }
+}
