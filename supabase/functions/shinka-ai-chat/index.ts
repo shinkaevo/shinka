@@ -322,8 +322,22 @@ Deno.serve(async (req: Request) => {
 
     const responseData = await aiResponse.json().catch(() => ({}));
     if (!aiResponse.ok) {
-      const detail = typeof responseData?.error?.message === "string" ? responseData.error.message : "Error del proveedor de IA.";
-      throw new Error(detail.slice(0, 300));
+      const cloudflareErrors = Array.isArray(responseData?.errors)
+        ? responseData.errors
+            .slice(0, 3)
+            .map((item: any) => {
+              const code = item?.code !== undefined ? `[${String(item.code).slice(0, 30)}]` : "";
+              const message = typeof item?.message === "string" ? item.message : "";
+              return `${code} ${message}`.trim();
+            })
+            .filter(Boolean)
+        : [];
+      const openAiError = typeof responseData?.error?.message === "string"
+        ? responseData.error.message
+        : "";
+      const detail = [openAiError, ...cloudflareErrors].filter(Boolean).join(" | ")
+        || `El proveedor respondió HTTP ${aiResponse.status} sin una explicación legible.`;
+      throw new Error(`HTTP ${aiResponse.status}: ${detail}`.slice(0, 450));
     }
     const answer = getText(responseData);
     if (!answer) throw new Error("El modelo no devolvió una respuesta de texto.");
