@@ -428,13 +428,13 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
 
       const { data: assurance, error: assuranceError } = await state.client.auth.mfa.getAuthenticatorAssuranceLevel();
       if (assuranceError) throw assuranceError;
-      if (assurance?.currentLevel === 'aal2') return false;
 
       const { data: factors, error: factorsError } = await state.client.auth.mfa.listFactors();
       if (factorsError) throw factorsError;
       const verifiedTotp = (factors?.totp || []).filter(factor => factor.status === 'verified');
 
       if (verifiedTotp.length) {
+        if (assurance?.currentLevel === 'aal2') return false;
         try { localStorage.removeItem('shinka_mfa_skipped_' + user.id); } catch (error) {}
         showMfaScreen('challenge', user, verifiedTotp[0]);
         return true;
