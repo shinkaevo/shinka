@@ -2,7 +2,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 
 const MODEL = Deno.env.get("SHINKA_AI_MODEL") || "gpt-6.2-astra";
-const AI_BASE_URL = (Deno.env.get("SHINKA_AI_BASE_URL") || "https://api.openai.com/v1").trim().replace(/\\/+$/, "");
+const AI_BASE_URL = (Deno.env.get("SHINKA_AI_BASE_URL") || "https://api.openai.com/v1").trim().replace(/\/+$/, "");
 const AI_ENDPOINT = `${AI_BASE_URL}/chat/completions`;
 const MAX_USER_MESSAGE = 6000;
 const MAX_OUTPUT_TOKENS = 4096;
