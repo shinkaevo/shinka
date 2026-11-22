@@ -1,5 +1,5 @@
 -- SHINKA: límites de clientes por plan.
--- CORE = 40 clientes, FLOW = 100 clientes, NEXUS = ilimitado (NULL).
+-- CORE = 40 clientes, FLOW = 100 clientes, NEXUS = ilimitado (JSON string).
 
 begin;
 
@@ -13,8 +13,8 @@ insert into public.plan_entitlements (
   entitlement_value
 )
 values
-  ('core', 'customers_limit', '40'::jsonb),
-  ('flow', 'customers_limit', '100'::jsonb),
-  ('nexus', 'customers_limit', '"unlimited"'::jsonb);
+  ('core', 'customers_limit', to_jsonb(40)),
+  ('flow', 'customers_limit', to_jsonb(100)),
+  ('nexus', 'customers_limit', to_jsonb('unlimited'::text));
 
 commit;
