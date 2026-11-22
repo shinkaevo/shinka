@@ -4,7 +4,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 const MODEL = Deno.env.get("SHINKA_AI_MODEL") || "gpt-6.2-astra";
 const OPENAI_URL = "https://api.openai.com/v1/responses";
 const MAX_USER_MESSAGE = 6000;
-const MAX_OUTPUT_TOKENS = 1800;
+const MAX_OUTPUT_TOKENS = 4096;
 const APP_ORIGIN = "https://shinkaevo.github.io";
 
 function json(data: unknown, status = 200) {
@@ -285,7 +285,7 @@ Deno.serve(async (req: Request) => {
         model: MODEL,
         instructions,
         input,
-        reasoning: { effort: "high" },
+        reasoning: { effort: "max" },
         max_output_tokens: MAX_OUTPUT_TOKENS,
         store: false,
       }),
