@@ -13,8 +13,8 @@ insert into public.plan_entitlements (
   entitlement_value
 )
 values
-  ('core', 'customers_limit', '40'),
-  ('flow', 'customers_limit', '100'),
-  ('nexus', 'customers_limit', null);
+  ('core', 'customers_limit', '40'::jsonb),
+  ('flow', 'customers_limit', '100'::jsonb),
+  ('nexus', 'customers_limit', '"unlimited"'::jsonb);
 
 commit;
