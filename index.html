@@ -1491,12 +1491,21 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
       $('aiChatForm').addEventListener('submit', async event => {
         event.preventDefault();
         const prompt = $('aiPrompt').value.trim();
-        if (!prompt || !state.aiConversationId) return;
+        if (!prompt) return;
         const button = $('aiSendBtn');
         button.disabled = true;
         button.textContent = 'Pensando…';
         $('aiPrompt').disabled = true;
         try {
+          // Create the first conversation automatically so the first message is never silently ignored.
+          if (!state.aiConversationId) {
+            const { data: conversation, error: conversationError } = await state.client
+              .from('ai_conversations')
+              .insert({ company_id: companyId, title: 'Nueva conversación' })
+              .select('id').single();
+            if (conversationError) throw conversationError;
+            state.aiConversationId = conversation.id;
+          }
           const { data, error } = await state.client.functions.invoke('shinka-ai-chat', {
             body: { company_id: companyId, conversation_id: state.aiConversationId, message: prompt }
           });
