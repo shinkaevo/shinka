@@ -501,7 +501,7 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
     function formatEntitlementLabel(key) {
       const normalized = String(key ?? '').trim().toLowerCase();
       if (ENTITLEMENT_LABELS[normalized]) return ENTITLEMENT_LABELS[normalized];
-      const words = normalized.split(/[_\\s]+/).filter(Boolean)
+      const words = normalized.split(/[_\s]+/).filter(Boolean)
         .map(word => ENTITLEMENT_WORDS[word] || word);
       const label = words.join(' ');
       return label ? label.charAt(0).toLocaleUpperCase('es-DO') + label.slice(1) : 'Capacidad';
