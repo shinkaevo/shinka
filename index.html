@@ -200,9 +200,8 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
         <button class="nav-item" type="button" data-page="orders"><svg class="ico" aria-hidden="true"><use href="#i-orders"/></svg>Pedidos</button>
         <button class="nav-item" type="button" data-page="finance"><svg class="ico" aria-hidden="true"><use href="#i-finance"/></svg>Finanzas</button>
         <button class="nav-item" type="button" data-page="appearance"><svg class="ico" aria-hidden="true"><use href="#i-appearance"/></svg>Apariencia</button>
-      <button class="nav-item hidden" type="button" data-page="developer"><svg class="ico" aria-hidden="true"><use href="#i-more"/></svg>Developer Mode</button>
-        <button class="nav-item hidden" type="button" data-page="developer"><svg class="ico" aria-hidden="true"><use href="#i-more"/></svg>Developer Mode</button>
-      </nav>
+<button class="nav-item hidden" type="button" data-page="developer"><svg class="ico" aria-hidden="true"><use href="#i-more"/></svg>Developer Mode</button>
+</nav>
       <div class="side-bottom"><div><div class="muted" style="font-size:12.5px">Espacio de trabajo</div><strong id="sideCompany">Empresa</strong></div><div id="sideEmail" class="user-email"></div><div id="sideRole" class="user-email"></div><button class="btn btn-secondary btn-block" id="logoutBtn" type="button"><svg class="ico" aria-hidden="true"><use href="#i-logout"/></svg>Cerrar sesión</button></div>
     </aside>
     <section class="main">
@@ -453,6 +452,82 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
         showMessage('globalMessage', friendlyError(error), 'error');
       }
     }
+    const ENTITLEMENT_LABELS = {
+      ai_pulses_per_month: 'Pulsos de IA por mes',
+      ai_usage: 'Uso de IA',
+      ai_enabled: 'Funciones de IA',
+      ai_generations_per_month: 'Generaciones de IA por mes',
+      customers_limit: 'Límite de clientes',
+      leads_limit: 'Límite de prospectos',
+      orders_limit: 'Límite de pedidos',
+      services_limit: 'Límite de servicios',
+      users_limit: 'Usuarios incluidos',
+      team_members_limit: 'Miembros del equipo',
+      storage_mb: 'Almacenamiento',
+      storage_gb: 'Almacenamiento',
+      custom_branding: 'Marca personalizada',
+      whatsapp_integration: 'Integración con WhatsApp',
+      api_access: 'Acceso a la API',
+      reports: 'Informes',
+      advanced_reports: 'Informes avanzados',
+      export_csv: 'Exportación CSV',
+      priority_support: 'Soporte prioritario'
+    };
+    const ENTITLEMENT_WORDS = {
+      ai: 'IA', api: 'API', csv: 'CSV', pdf: 'PDF', crm: 'CRM',
+      pulses: 'pulsos', pulse: 'pulso', usage: 'uso', enabled: 'incluido',
+      enable: 'activar', limit: 'límite', max: 'máximo', per: 'por',
+      month: 'mes', monthly: 'mensual', day: 'día', daily: 'diario',
+      user: 'usuario', users: 'usuarios', customer: 'cliente',
+      customers: 'clientes', lead: 'prospecto', leads: 'prospectos',
+      order: 'pedido', orders: 'pedidos', service: 'servicio',
+      services: 'servicios', team: 'equipo', members: 'miembros',
+      storage: 'almacenamiento', mb: 'MB', gb: 'GB', automation: 'automatización',
+      automations: 'automatizaciones', reports: 'informes', report: 'informe',
+      export: 'exportación', exports: 'exportaciones', whatsapp: 'WhatsApp',
+      email: 'correo', support: 'soporte', priority: 'prioritario',
+      custom: 'personalizado', branding: 'marca', integrations: 'integraciones',
+      integration: 'integración', dashboard: 'panel', analytics: 'analítica',
+      finance: 'finanzas', roles: 'roles', permissions: 'permisos',
+      webhooks: 'webhooks', notifications: 'notificaciones',
+      reminders: 'recordatorios', calendar: 'calendario',
+      products: 'productos', product: 'producto', invoices: 'facturas',
+      invoice: 'factura', taxes: 'impuestos', attachments: 'archivos adjuntos',
+      files: 'archivos', contacts: 'contactos', projects: 'proyectos',
+      project: 'proyecto', activity: 'actividad', history: 'historial',
+      audit: 'auditoría'
+    };
+
+    function formatEntitlementLabel(key) {
+      const normalized = String(key ?? '').trim().toLowerCase();
+      if (ENTITLEMENT_LABELS[normalized]) return ENTITLEMENT_LABELS[normalized];
+      const words = normalized.split(/[_\\s]+/).filter(Boolean)
+        .map(word => ENTITLEMENT_WORDS[word] || word);
+      const label = words.join(' ');
+      return label ? label.charAt(0).toLocaleUpperCase('es-DO') + label.slice(1) : 'Capacidad';
+    }
+
+    function formatEntitlementValue(value) {
+      if (value === true) return 'Incluido';
+      if (value === false) return 'No incluido';
+      if (value === null || value === undefined) return '—';
+      if (typeof value === 'number') return new Intl.NumberFormat('es-DO').format(value);
+      if (Array.isArray(value)) {
+        return value.length ? value.map(formatEntitlementValue).join(', ') : 'Ninguno';
+      }
+      if (typeof value === 'object') {
+        const entries = Object.entries(value);
+        return entries.length
+          ? entries.map(([key, item]) => formatEntitlementLabel(key) + ': ' + formatEntitlementValue(item)).join(' · ')
+          : 'Sin detalles';
+      }
+      const text = String(value).trim();
+      if (/^(unlimited|infinite)$/i.test(text)) return 'Ilimitado';
+      if (/^true$/i.test(text)) return 'Incluido';
+      if (/^false$/i.test(text)) return 'No incluido';
+      return text;
+    }
+
     async function renderDeveloper() {
       if (!state.isPlatformDeveloper) throw new Error('No tienes acceso a Developer Mode.');
       const [plansRes, entitlementsRes, simulationRes] = await Promise.all([
@@ -483,10 +558,10 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
       const cards = plans.map(plan => {
         const planEntitlements = entitlements.filter(item => item.plan_code === plan.plan_code);
         const features = planEntitlements.map(item => {
-          const rawValue = item.entitlement_value;
-          const value = rawValue && typeof rawValue === 'object' ? JSON.stringify(rawValue) : String(rawValue);
-          return '<li style="display:flex;justify-content:space-between;gap:12px;padding:5px 0;border-bottom:1px solid var(--line)"><span>' +
-            escapeHTML(item.entitlement_key) + '</span><strong style="text-align:right;overflow-wrap:anywhere">' +
+          const label = formatEntitlementLabel(item.entitlement_key);
+          const value = formatEntitlementValue(item.entitlement_value);
+          return '<li style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding:8px 0;border-bottom:1px solid var(--line)"><span>' +
+            escapeHTML(label) + '</span><strong style="text-align:right;overflow-wrap:anywhere">' +
             escapeHTML(value) + '</strong></li>';
         }).join('');
         const price = new Intl.NumberFormat('es-DO', {
@@ -498,7 +573,7 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
           '</h2>' + (selected ? '<span class="badge-status" data-s="completed">Activo en simulación</span>' : '') + '</div>' +
           '<p>' + escapeHTML(plan.description || '') + '</p><div style="font-size:26px;font-weight:700;margin-top:10px">' +
           escapeHTML(price) + '<span style="font-size:13px;font-weight:400;color:var(--muted)"> / mes</span></div></div>' +
-          '<details><summary style="cursor:pointer;font-weight:600">Ver capacidades (' +
+          '<details><summary style="cursor:pointer;font-weight:600">Capacidades incluidas (' +
           planEntitlements.length + ')</summary><ul style="list-style:none;padding:8px 0 0;margin:0">' +
           (features || '<li class="muted">Sin capacidades registradas.</li>') + '</ul></details>' +
           '<button class="btn ' + (selected ? 'btn-secondary' : 'btn-primary') +
