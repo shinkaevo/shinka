@@ -248,7 +248,7 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
     const APP_REDIRECT_URL = new URL('.', window.location.href).href;
 
     const $ = (id) => document.getElementById(id);
-    const state = { mode: 'login', user: null, company: null, client: null, page: 'dashboard', isPlatformDeveloper: false, developerSimulation: null };
+    const state = { mode: 'login', user: null, company: null, client: null, page: 'dashboard', isPlatformDeveloper: false, developerSimulation: null, effectivePlanCode: null, planEntitlements: {} };
     const pageMeta = {
       dashboard: ['Dashboard', 'Resumen de tu espacio de trabajo.', 'VISTA GENERAL'],
       customers: ['Clientes', 'Administra los contactos de tu empresa.', 'GESTIÓN COMERCIAL'],
@@ -280,35 +280,51 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
       if (roleLabel) roleLabel.textContent = ROLE_LABELS[state.role] || 'Acceso limitado';
     }
 
+    async function refreshCompanyPlan() {
+      state.effectivePlanCode = null;
+      state.planEntitlements = {};
+      if (!state.user || !state.company || !state.client) return;
+      try {
+        const { data, error } = await state.client.rpc('get_company_entitlements', {
+          p_company_id: state.company.id
+        });
+        if (error) throw error;
+        const rows = Array.isArray(data) ? data : (data ? [data] : []);
+        state.effectivePlanCode = rows[0]?.plan_code || null;
+        state.planEntitlements = Object.fromEntries(
+          rows.filter(row => row.entitlement_key).map(row => [row.entitlement_key, row.entitlement_value])
+        );
+      } catch (error) {
+        console.warn('No se pudieron cargar las capacidades del plan:', error);
+      }
+    }
+
     async function refreshDeveloperAccess() {
       state.isPlatformDeveloper = false;
       state.developerSimulation = null;
       if (!state.user || !state.company || !state.client) return;
 
-      // La autorización y la carga de la simulación son comprobaciones independientes.
-      // Un fallo al consultar la simulación no debe ocultar el acceso ya autorizado.
       try {
         const { data, error } = await state.client.rpc('is_platform_developer');
         if (error) throw error;
         state.isPlatformDeveloper = data === true;
       } catch (error) {
         console.warn('No se pudo verificar el acceso a Developer Mode:', error);
-        state.isPlatformDeveloper = false;
-        return;
       }
 
-      if (!state.isPlatformDeveloper) return;
-
-      try {
-        const { data: simulation, error: simulationError } = await state.client.rpc('get_developer_plan', {
-          p_company_id: state.company.id
-        });
-        if (simulationError) throw simulationError;
-        state.developerSimulation = Array.isArray(simulation) ? (simulation[0] || null) : (simulation || null);
-      } catch (error) {
-        console.warn('Acceso de Developer Mode verificado, pero no se pudo cargar la simulación:', error);
-        state.developerSimulation = null;
+      if (state.isPlatformDeveloper) {
+        try {
+          const { data: simulation, error: simulationError } = await state.client.rpc('get_developer_plan', {
+            p_company_id: state.company.id
+          });
+          if (simulationError) throw simulationError;
+          state.developerSimulation = Array.isArray(simulation) ? (simulation[0] || null) : (simulation || null);
+        } catch (error) {
+          console.warn('Acceso de Developer Mode verificado, pero no se pudo cargar la simulación:', error);
+          state.developerSimulation = null;
+        }
       }
+      await refreshCompanyPlan();
     }
 
     function showMessage(id, text, type = 'info') {
@@ -595,7 +611,7 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
         '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr));gap:16px;margin-top:18px">' +
         (cards || '<section class="section">No hay planes activos en el catálogo.</section>') +
         '</div>' +
-        '<section class="section"><h2>Importante</h2><p>Esta herramienta crea una simulación privada de 12 horas. No genera pagos, no cambia la suscripción real y no activa todavía límites de funciones en módulos que aún no estén conectados al sistema de capacidades.</p>' +
+        '<section class="section"><h2>Importante</h2><p>La simulación dura 12 horas y no genera cobros. Los límites de clientes, prospectos, servicios y pedidos se aplican al crear registros. La suscripción y la facturación real siguen siendo independientes.</p>' +
         '<div id="developerMessage" class="message" role="status" aria-live="polite"></div></section>';
 
       document.querySelectorAll('[data-developer-plan]').forEach(button => {
@@ -643,6 +659,35 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
     async function getCount(table) {
       const { count, error } = await state.client.from(table).select('id', {count:'exact', head:true}).eq('company_id', state.company.id);
       if (error) throw error; return count ?? 0;
+    }
+    function getPlanLimit(key) {
+      let value = state.planEntitlements?.[key];
+      if (value && typeof value === 'object' && !Array.isArray(value)) {
+        value = value.limit ?? value.max ?? value.value ?? null;
+      }
+      if (value === null || value === undefined) return null;
+      if (typeof value === 'boolean') return value ? Infinity : 0;
+      if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+      const normalized = String(value).trim().toLowerCase();
+      if (['unlimited', 'infinite', 'ilimitado', 'infinito'].includes(normalized)) return Infinity;
+      if (!normalized) return null;
+      const parsed = Number(normalized);
+      return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+    }
+    function formatPlanUsage(key, current) {
+      const limit = getPlanLimit(key);
+      if (limit === null) return '';
+      if (limit === Infinity) return ' · Sin límite';
+      return ' · ' + current + '/' + limit + ' utilizados';
+    }
+    async function assertPlanLimit(key, table, label) {
+      const limit = getPlanLimit(key);
+      if (limit === null || limit === Infinity) return;
+      const current = await getCount(table);
+      if (current >= limit) {
+        const plan = state.effectivePlanCode ? ' del plan ' + state.effectivePlanCode.toUpperCase() : '';
+        throw new Error('Has alcanzado el límite' + plan + ': ' + limit + ' ' + label + '. Actualiza el plan para continuar.');
+      }
     }
     /* ===== SHINKA · utilidades de interfaz ===== */
     const STATUS_ES = {new:'Nuevo',contacted:'Contactado',qualified:'Calificado',won:'Convertido',lost:'Perdido',pending:'Pendiente',in_progress:'En proceso',completed:'Completado',cancelled:'Cancelado',refunded:'Reembolsado'};
@@ -750,7 +795,7 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
 
     /* ===== SHINKA · Apariencia ===== */
     async function renderAppearance() {
-      const c = state.company, canEdit = ['owner', 'admin'].includes(state.role), dis = canEdit ? '' : ' disabled';
+      const c = state.company, canEdit = canEditCompany(), dis = canEdit ? '' : ' disabled';
       let v = companyPalette(), logo = LOGO_OK.test(c.logo_url || '') ? c.logo_url : null, logoMode = (c.appearance && c.appearance.logoMode) === 'logo' ? 'logo' : 'both';
       $('pageContent').innerHTML = `
         <div class="two-col ap">
@@ -793,11 +838,12 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
         button.disabled = true;
         button.textContent = 'Guardando…';
         try {
-          const { data, error } = await state.client.from('companies')
-            .update({ name: nextName }).eq('id', c.id).select('id,name');
+          const { data, error } = await state.client.rpc('update_company_name', {
+            p_company_id: c.id,
+            p_name: nextName
+          });
           if (error) throw error;
-          if (!data || !data.length) throw new Error('No tienes permiso para cambiar el nombre de esta empresa.');
-          const savedName = data[0].name || nextName;
+          const savedName = (typeof data === 'string' ? data : data?.name) || nextName;
           state.company = { ...state.company, name: savedName };
           c.name = savedName;
           $('sideCompany').textContent = savedName;
@@ -913,7 +959,7 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
       $('pageContent').innerHTML = `
         <div class="two-col"><section class="section" style="margin-top:0"><h2>Nuevo cliente</h2><p>Guarda los datos básicos de un cliente.</p>
           <form id="customerForm"><div class="field"><label>Nombre *</label><input name="name" required maxlength="150" placeholder="Nombre del cliente"></div><div class="field"><label>Correo</label><input name="email" type="email" maxlength="254" placeholder="correo@ejemplo.com"></div><div class="field"><label>Teléfono</label><input name="phone" maxlength="40" placeholder="Teléfono"></div><div class="field"><label>Notas</label><textarea name="notes" maxlength="2000" placeholder="Información adicional"></textarea></div><button class="btn btn-primary btn-block" type="submit">Guardar cliente</button></form>
-        </section><section class="section" style="margin-top:0"><div class="toolbar"><div><h2>Mis clientes</h2><p>${data.length} registro(s)</p></div><button class="btn btn-secondary small-btn" id="refreshCustomers" type="button">Actualizar</button></div>
+        </section><section class="section" style="margin-top:0"><div class="toolbar"><div><h2>Mis clientes</h2><p>${data.length} registro(s)${formatPlanUsage('customers_limit', data.length)}</p></div><button class="btn btn-secondary small-btn" id="refreshCustomers" type="button">Actualizar</button></div>
           ${data.length ? `<div class="table-wrap"><table><thead><tr><th>Nombre</th><th>Correo</th><th>Teléfono</th><th>Acción</th></tr></thead><tbody>${data.map(r=>`<tr><td>${escapeHTML(r.name)}</td><td>${escapeHTML(r.email || '—')}</td><td>${escapeHTML(r.phone || '—')}</td><td><button class="btn btn-danger small-btn" data-delete-customer="${r.id}" type="button">Eliminar</button></td></tr>`).join('')}</tbody></table></div>` : '<div class="empty-state">Todavía no hay clientes. Añade el primero desde el formulario.</div>'}
         </section></div>`;
       if (!canManage) {
@@ -924,7 +970,7 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
       const customerForm = $('customerForm');
       if (customerForm) customerForm.addEventListener('submit', async e=>{
         e.preventDefault(); const form=e.currentTarget; const f=new FormData(form); const btn=form.querySelector('button[type="submit"]'); btn.disabled=true;
-        try { const {error}=await state.client.from('customers').insert({company_id:state.company.id,name:String(f.get('name')).trim(),email:String(f.get('email')).trim()||null,phone:String(f.get('phone')).trim()||null,notes:String(f.get('notes')).trim()||null}); if(error) throw error; showMessage('globalMessage','Cliente guardado correctamente.','success'); await renderCustomers(); }
+        try { await assertPlanLimit('customers_limit','customers','clientes'); const {error}=await state.client.from('customers').insert({company_id:state.company.id,name:String(f.get('name')).trim(),email:String(f.get('email')).trim()||null,phone:String(f.get('phone')).trim()||null,notes:String(f.get('notes')).trim()||null}); if(error) throw error; showMessage('globalMessage','Cliente guardado correctamente.','success'); await renderCustomers(); }
         catch(err){showMessage('globalMessage',friendlyError(err),'error');btn.disabled=false;}
       });
       $('refreshCustomers').addEventListener('click',renderCustomers);
@@ -933,7 +979,7 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
     async function renderLeads() {
       const canManage = canManageOperations();
       const {data,error}=await state.client.from('leads').select('id,name,email,phone,source,status,created_at').eq('company_id',state.company.id).order('created_at',{ascending:false}); if(error)throw error;
-      $('pageContent').innerHTML=`<div class="two-col"><section class="section" style="margin-top:0"><h2>Nuevo prospecto</h2><p>Registra un posible cliente para darle seguimiento.</p><form id="leadForm"><div class="field"><label>Nombre *</label><input name="name" required maxlength="150"></div><div class="field"><label>Correo</label><input name="email" type="email"></div><div class="field"><label>Teléfono</label><input name="phone"></div><div class="field"><label>Origen</label><input name="source" placeholder="Instagram, referido…"></div><div class="field"><label>Estado</label><select name="status"><option value="new">Nuevo</option><option value="contacted">Contactado</option><option value="qualified">Calificado</option><option value="won">Convertido</option><option value="lost">Perdido</option></select></div><button class="btn btn-primary btn-block" type="submit">Guardar prospecto</button></form></section><section class="section" style="margin-top:0"><h2>Seguimiento de prospectos</h2><p>${data.length} registro(s)</p>${data.length?`<div class="table-wrap"><table><thead><tr><th>Nombre</th><th>Contacto</th><th>Estado</th><th>Actualizar</th></tr></thead><tbody>${data.map(r=>`<tr><td>${escapeHTML(r.name)}</td><td>${escapeHTML(r.email||r.phone||'—')}</td><td><span class="badge-status" data-s="${escapeHTML(r.status)}">${escapeHTML(statusLabel(r.status))}</span></td><td><select data-lead-status="${r.id}" aria-label="Estado de ${escapeHTML(r.name)}"><option value="new" ${r.status==='new'?'selected':''}>Nuevo</option><option value="contacted" ${r.status==='contacted'?'selected':''}>Contactado</option><option value="qualified" ${r.status==='qualified'?'selected':''}>Calificado</option><option value="won" ${r.status==='won'?'selected':''}>Convertido</option><option value="lost" ${r.status==='lost'?'selected':''}>Perdido</option></select></td></tr>`).join('')}</tbody></table></div>`:'<div class="empty-state">Todavía no hay prospectos registrados.</div>'}</section></div>`;
+      $('pageContent').innerHTML=`<div class="two-col"><section class="section" style="margin-top:0"><h2>Nuevo prospecto</h2><p>Registra un posible cliente para darle seguimiento.</p><form id="leadForm"><div class="field"><label>Nombre *</label><input name="name" required maxlength="150"></div><div class="field"><label>Correo</label><input name="email" type="email"></div><div class="field"><label>Teléfono</label><input name="phone"></div><div class="field"><label>Origen</label><input name="source" placeholder="Instagram, referido…"></div><div class="field"><label>Estado</label><select name="status"><option value="new">Nuevo</option><option value="contacted">Contactado</option><option value="qualified">Calificado</option><option value="won">Convertido</option><option value="lost">Perdido</option></select></div><button class="btn btn-primary btn-block" type="submit">Guardar prospecto</button></form></section><section class="section" style="margin-top:0"><h2>Seguimiento de prospectos</h2><p>${data.length} registro(s)${formatPlanUsage('leads_limit', data.length)}</p>${data.length?`<div class="table-wrap"><table><thead><tr><th>Nombre</th><th>Contacto</th><th>Estado</th><th>Actualizar</th></tr></thead><tbody>${data.map(r=>`<tr><td>${escapeHTML(r.name)}</td><td>${escapeHTML(r.email||r.phone||'—')}</td><td><span class="badge-status" data-s="${escapeHTML(r.status)}">${escapeHTML(statusLabel(r.status))}</span></td><td><select data-lead-status="${r.id}" aria-label="Estado de ${escapeHTML(r.name)}"><option value="new" ${r.status==='new'?'selected':''}>Nuevo</option><option value="contacted" ${r.status==='contacted'?'selected':''}>Contactado</option><option value="qualified" ${r.status==='qualified'?'selected':''}>Calificado</option><option value="won" ${r.status==='won'?'selected':''}>Convertido</option><option value="lost" ${r.status==='lost'?'selected':''}>Perdido</option></select></td></tr>`).join('')}</tbody></table></div>`:'<div class="empty-state">Todavía no hay prospectos registrados.</div>'}</section></div>`;
       if (!canManage) {
         $('leadForm')?.closest('section')?.remove();
         document.querySelectorAll('[data-lead-status]').forEach(sel => {
@@ -944,20 +990,20 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
         if (header) header.textContent = 'Estado';
       }
       const leadForm = $('leadForm');
-      if (leadForm) leadForm.addEventListener('submit',async e=>{e.preventDefault();const f=new FormData(e.currentTarget);const btn=e.currentTarget.querySelector('button');btn.disabled=true;try{const {error}=await state.client.from('leads').insert({company_id:state.company.id,name:String(f.get('name')).trim(),email:String(f.get('email')).trim()||null,phone:String(f.get('phone')).trim()||null,source:String(f.get('source')).trim()||null,status:f.get('status')});if(error)throw error;showMessage('globalMessage','Prospecto guardado.','success');await renderLeads();}catch(err){showMessage('globalMessage',friendlyError(err),'error');btn.disabled=false;}});
+      if (leadForm) leadForm.addEventListener('submit',async e=>{e.preventDefault();const f=new FormData(e.currentTarget);const btn=e.currentTarget.querySelector('button');btn.disabled=true;try{await assertPlanLimit('leads_limit','leads','prospectos');const {error}=await state.client.from('leads').insert({company_id:state.company.id,name:String(f.get('name')).trim(),email:String(f.get('email')).trim()||null,phone:String(f.get('phone')).trim()||null,source:String(f.get('source')).trim()||null,status:f.get('status')});if(error)throw error;showMessage('globalMessage','Prospecto guardado.','success');await renderLeads();}catch(err){showMessage('globalMessage',friendlyError(err),'error');btn.disabled=false;}});
       document.querySelectorAll('[data-lead-status]').forEach(sel=>sel.addEventListener('change',async()=>{const {error}=await state.client.from('leads').update({status:sel.value}).eq('id',sel.dataset.leadStatus).eq('company_id',state.company.id);if(error)showMessage('globalMessage',friendlyError(error),'error');else showMessage('globalMessage','Estado actualizado.','success');}));
     }
     async function renderServices() {
       const canManage = canManageOperations();
       const {data,error}=await state.client.from('services').select('id,name,description,price,currency,active,created_at').eq('company_id',state.company.id).order('created_at',{ascending:false});if(error)throw error;
-      $('pageContent').innerHTML=`<div class="two-col"><section class="section" style="margin-top:0"><h2>Nuevo servicio</h2><p>Añade lo que ofrece tu empresa.</p><form id="serviceForm"><div class="field"><label>Nombre *</label><input name="name" required maxlength="150" placeholder="Ej. Diseño de publicaciones"></div><div class="field"><label>Descripción</label><textarea name="description" maxlength="2000"></textarea></div><div class="form-grid"><div class="field"><label>Precio *</label><input name="price" type="number" min="0" step="0.01" value="0" required></div><div class="field"><label>Moneda</label><select name="currency">${currencyOptionsHTML(state.company.currency)}</select></div></div><button class="btn btn-primary btn-block" type="submit">Guardar servicio</button></form></section><section class="section" style="margin-top:0"><h2>Catálogo de servicios</h2><p>${data.length} servicio(s)</p>${data.length?`<div class="table-wrap"><table><thead><tr><th>Servicio</th><th>Precio</th><th>Estado</th><th>Acción</th></tr></thead><tbody>${data.map(r=>`<tr><td>${escapeHTML(r.name)}</td><td>${money(r.price,r.currency)}</td><td><span class="badge-status">${r.active?'Activo':'Inactivo'}</span></td><td><button class="btn btn-secondary small-btn" data-toggle-service="${r.id}" data-active="${r.active}">${r.active?'Desactivar':'Activar'}</button></td></tr>`).join('')}</tbody></table></div>`:'<div class="empty-state">Tu catálogo está vacío. Añade el primer servicio.</div>'}</section></div>`;
+      $('pageContent').innerHTML=`<div class="two-col"><section class="section" style="margin-top:0"><h2>Nuevo servicio</h2><p>Añade lo que ofrece tu empresa.</p><form id="serviceForm"><div class="field"><label>Nombre *</label><input name="name" required maxlength="150" placeholder="Ej. Diseño de publicaciones"></div><div class="field"><label>Descripción</label><textarea name="description" maxlength="2000"></textarea></div><div class="form-grid"><div class="field"><label>Precio *</label><input name="price" type="number" min="0" step="0.01" value="0" required></div><div class="field"><label>Moneda</label><select name="currency">${currencyOptionsHTML(state.company.currency)}</select></div></div><button class="btn btn-primary btn-block" type="submit">Guardar servicio</button></form></section><section class="section" style="margin-top:0"><h2>Catálogo de servicios</h2><p>${data.length} servicio(s)${formatPlanUsage('services_limit', data.length)}</p>${data.length?`<div class="table-wrap"><table><thead><tr><th>Servicio</th><th>Precio</th><th>Estado</th><th>Acción</th></tr></thead><tbody>${data.map(r=>`<tr><td>${escapeHTML(r.name)}</td><td>${money(r.price,r.currency)}</td><td><span class="badge-status">${r.active?'Activo':'Inactivo'}</span></td><td><button class="btn btn-secondary small-btn" data-toggle-service="${r.id}" data-active="${r.active}">${r.active?'Desactivar':'Activar'}</button></td></tr>`).join('')}</tbody></table></div>`:'<div class="empty-state">Tu catálogo está vacío. Añade el primer servicio.</div>'}</section></div>`;
       if (!canManage) {
         $('serviceForm')?.closest('section')?.remove();
         document.querySelectorAll('[data-toggle-service]').forEach(btn => btn.closest('td')?.remove());
         $('pageContent').querySelector('thead th:last-child')?.remove();
       }
       const serviceForm = $('serviceForm');
-      if (serviceForm) serviceForm.addEventListener('submit',async e=>{e.preventDefault();const f=new FormData(e.currentTarget);const btn=e.currentTarget.querySelector('button');btn.disabled=true;try{const {error}=await state.client.from('services').insert({company_id:state.company.id,name:String(f.get('name')).trim(),description:String(f.get('description')).trim()||null,price:Number(f.get('price')),currency:f.get('currency')});if(error)throw error;showMessage('globalMessage','Servicio guardado.','success');await renderServices();}catch(err){showMessage('globalMessage',friendlyError(err),'error');btn.disabled=false;}});
+      if (serviceForm) serviceForm.addEventListener('submit',async e=>{e.preventDefault();const f=new FormData(e.currentTarget);const btn=e.currentTarget.querySelector('button');btn.disabled=true;try{await assertPlanLimit('services_limit','services','servicios');const {error}=await state.client.from('services').insert({company_id:state.company.id,name:String(f.get('name')).trim(),description:String(f.get('description')).trim()||null,price:Number(f.get('price')),currency:f.get('currency')});if(error)throw error;showMessage('globalMessage','Servicio guardado.','success');await renderServices();}catch(err){showMessage('globalMessage',friendlyError(err),'error');btn.disabled=false;}});
       document.querySelectorAll('[data-toggle-service]').forEach(btn=>btn.addEventListener('click',async()=>{const active=btn.dataset.active==='true';const {error}=await state.client.from('services').update({active:!active}).eq('id',btn.dataset.toggleService).eq('company_id',state.company.id);if(error)showMessage('globalMessage',friendlyError(error),'error');else{showMessage('globalMessage','Estado del servicio actualizado.','success');await renderServices();}}));
     }
     async function renderOrders() {
@@ -968,7 +1014,7 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
         state.client.from('services').select('id,name,price,currency').eq('company_id',state.company.id).eq('active',true).order('name')
       ]);if(ordersRes.error)throw ordersRes.error;if(customersRes.error)throw customersRes.error;if(servicesRes.error)throw servicesRes.error;
       const orders=ordersRes.data||[],customers=customersRes.data||[],services=servicesRes.data||[];
-      $('pageContent').innerHTML=`<div class="two-col"><section class="section" style="margin-top:0"><h2>Nuevo pedido</h2><p>Registra un trabajo y su precio.</p><form id="orderForm"><div class="field"><label>Descripción del pedido *</label><input name="title" required maxlength="180" placeholder="Ej. Paquete de diseños"></div><div class="field"><label>Cliente</label><select name="customer_id"><option value="">Sin cliente asignado</option>${customers.map(c=>`<option value="${c.id}">${escapeHTML(c.name)}</option>`).join('')}</select></div><div class="field"><label>Servicio</label><select name="service_id" id="orderService"><option value="">Seleccionar manualmente</option>${services.map(s=>`<option value="${s.id}" data-price="${s.price}" data-currency="${escapeHTML(s.currency)}">${escapeHTML(s.name)} — ${money(s.price,s.currency)}</option>`).join('')}</select></div><div class="form-grid"><div class="field"><label>Cantidad</label><input name="quantity" type="number" min="0.01" step="0.01" value="1" required></div><div class="field"><label>Precio unitario</label><input name="unit_price" id="orderPrice" type="number" min="0" step="0.01" value="0" required></div></div><div class="form-grid"><div class="field"><label>Moneda</label><select name="currency" id="orderCurrency">${currencyOptionsHTML(state.company.currency)}</select></div><div class="field"><label>Fecha de entrega</label><input name="due_date" type="date"></div></div><div class="field"><label>Estado</label><select name="status"><option value="pending">Pendiente</option><option value="in_progress">En proceso</option><option value="completed">Completado</option><option value="cancelled">Cancelado</option></select></div><button class="btn btn-primary btn-block" type="submit">Guardar pedido</button></form></section><section class="section" style="margin-top:0"><h2>Pedidos registrados</h2><p>${orders.length} pedido(s)</p>${orders.length?`<div class="table-wrap"><table><thead><tr><th>Pedido</th><th>Total</th><th>Estado</th><th>Actualizar</th></tr></thead><tbody>${orders.map(o=>`<tr><td>${escapeHTML(o.title)}</td><td>${money(o.total_amount,o.currency)}</td><td><span class="badge-status" data-s="${escapeHTML(o.status)}">${escapeHTML(statusLabel(o.status))}</span></td><td><select data-order-status="${o.id}" aria-label="Estado de pedido"><option value="pending" ${o.status==='pending'?'selected':''}>Pendiente</option><option value="in_progress" ${o.status==='in_progress'?'selected':''}>En proceso</option><option value="completed" ${o.status==='completed'?'selected':''}>Completado</option><option value="cancelled" ${o.status==='cancelled'?'selected':''}>Cancelado</option></select></td></tr>`).join('')}</tbody></table></div>`:'<div class="empty-state">Todavía no hay pedidos.</div>'}</section></div>`;
+      $('pageContent').innerHTML=`<div class="two-col"><section class="section" style="margin-top:0"><h2>Nuevo pedido</h2><p>Registra un trabajo y su precio.</p><form id="orderForm"><div class="field"><label>Descripción del pedido *</label><input name="title" required maxlength="180" placeholder="Ej. Paquete de diseños"></div><div class="field"><label>Cliente</label><select name="customer_id"><option value="">Sin cliente asignado</option>${customers.map(c=>`<option value="${c.id}">${escapeHTML(c.name)}</option>`).join('')}</select></div><div class="field"><label>Servicio</label><select name="service_id" id="orderService"><option value="">Seleccionar manualmente</option>${services.map(s=>`<option value="${s.id}" data-price="${s.price}" data-currency="${escapeHTML(s.currency)}">${escapeHTML(s.name)} — ${money(s.price,s.currency)}</option>`).join('')}</select></div><div class="form-grid"><div class="field"><label>Cantidad</label><input name="quantity" type="number" min="0.01" step="0.01" value="1" required></div><div class="field"><label>Precio unitario</label><input name="unit_price" id="orderPrice" type="number" min="0" step="0.01" value="0" required></div></div><div class="form-grid"><div class="field"><label>Moneda</label><select name="currency" id="orderCurrency">${currencyOptionsHTML(state.company.currency)}</select></div><div class="field"><label>Fecha de entrega</label><input name="due_date" type="date"></div></div><div class="field"><label>Estado</label><select name="status"><option value="pending">Pendiente</option><option value="in_progress">En proceso</option><option value="completed">Completado</option><option value="cancelled">Cancelado</option></select></div><button class="btn btn-primary btn-block" type="submit">Guardar pedido</button></form></section><section class="section" style="margin-top:0"><h2>Pedidos registrados</h2><p>${orders.length} pedido(s)${formatPlanUsage('orders_limit', orders.length)}</p>${orders.length?`<div class="table-wrap"><table><thead><tr><th>Pedido</th><th>Total</th><th>Estado</th><th>Actualizar</th></tr></thead><tbody>${orders.map(o=>`<tr><td>${escapeHTML(o.title)}</td><td>${money(o.total_amount,o.currency)}</td><td><span class="badge-status" data-s="${escapeHTML(o.status)}">${escapeHTML(statusLabel(o.status))}</span></td><td><select data-order-status="${o.id}" aria-label="Estado de pedido"><option value="pending" ${o.status==='pending'?'selected':''}>Pendiente</option><option value="in_progress" ${o.status==='in_progress'?'selected':''}>En proceso</option><option value="completed" ${o.status==='completed'?'selected':''}>Completado</option><option value="cancelled" ${o.status==='cancelled'?'selected':''}>Cancelado</option></select></td></tr>`).join('')}</tbody></table></div>`:'<div class="empty-state">Todavía no hay pedidos.</div>'}</section></div>`;
       if (!canManage) {
         $('orderForm')?.closest('section')?.remove();
         document.querySelectorAll('[data-order-status]').forEach(sel => {
@@ -979,7 +1025,7 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
         if (header) header.textContent = 'Estado';
       }
       if ($('orderService')) $('orderService').addEventListener('change',()=>{const opt=$('orderService').selectedOptions[0];if(opt?.dataset.price){$('orderPrice').value=opt.dataset.price;$('orderCurrency').value=opt.dataset.currency;}});
-      const orderForm = $('orderForm'); if (orderForm) orderForm.addEventListener('submit',async e=>{e.preventDefault();const f=new FormData(e.currentTarget);const btn=e.currentTarget.querySelector('button');btn.disabled=true;try{const {error}=await state.client.from('orders').insert({company_id:state.company.id,title:String(f.get('title')).trim(),customer_id:String(f.get('customer_id'))||null,service_id:String(f.get('service_id'))||null,quantity:Number(f.get('quantity')),unit_price:Number(f.get('unit_price')),currency:f.get('currency'),due_date:String(f.get('due_date'))||null,status:f.get('status')});if(error)throw error;showMessage('globalMessage','Pedido guardado.','success');await renderOrders();}catch(err){showMessage('globalMessage',friendlyError(err),'error');btn.disabled=false;}});
+      const orderForm = $('orderForm'); if (orderForm) orderForm.addEventListener('submit',async e=>{e.preventDefault();const f=new FormData(e.currentTarget);const btn=e.currentTarget.querySelector('button');btn.disabled=true;try{await assertPlanLimit('orders_limit','orders','pedidos');const {error}=await state.client.from('orders').insert({company_id:state.company.id,title:String(f.get('title')).trim(),customer_id:String(f.get('customer_id'))||null,service_id:String(f.get('service_id'))||null,quantity:Number(f.get('quantity')),unit_price:Number(f.get('unit_price')),currency:f.get('currency'),due_date:String(f.get('due_date'))||null,status:f.get('status')});if(error)throw error;showMessage('globalMessage','Pedido guardado.','success');await renderOrders();}catch(err){showMessage('globalMessage',friendlyError(err),'error');btn.disabled=false;}});
       document.querySelectorAll('[data-order-status]').forEach(sel=>sel.addEventListener('change',async()=>{const {error}=await state.client.from('orders').update({status:sel.value}).eq('id',sel.dataset.orderStatus).eq('company_id',state.company.id);if(error)showMessage('globalMessage',friendlyError(error),'error');else showMessage('globalMessage','Estado del pedido actualizado.','success');}));
     }
     async function renderFinance() {
