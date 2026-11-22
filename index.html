@@ -227,6 +227,7 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
         <button class="nav-item" type="button" data-page="finance"><svg class="ico" aria-hidden="true"><use href="#i-finance"/></svg>Finanzas</button>
         <button class="nav-item hidden" type="button" data-page="team"><svg class="ico" aria-hidden="true"><use href="#i-team"/></svg>Equipo</button>
         <button class="nav-item" type="button" data-page="appearance"><svg class="ico" aria-hidden="true"><use href="#i-appearance"/></svg>Apariencia</button>
+        <button class="nav-item hidden" type="button" data-page="security"><svg class="ico" aria-hidden="true"><use href="#i-security"/></svg>Seguridad</button>
 <button class="nav-item hidden" type="button" data-page="developer"><svg class="ico" aria-hidden="true"><use href="#i-more"/></svg>Developer Mode</button>
 </nav>
       <div class="side-bottom"><div><div class="muted" style="font-size:12.5px">Espacio de trabajo</div><strong id="sideCompany">Empresa</strong></div><div id="sideEmail" class="user-email"></div><div id="sideRole" class="user-email"></div><button class="btn btn-secondary btn-block" id="logoutBtn" type="button"><svg class="ico" aria-hidden="true"><use href="#i-logout"/></svg>Cerrar sesión</button></div>
@@ -249,6 +250,7 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
       <button class="nav-item" type="button" data-page="services"><svg class="ico" aria-hidden="true"><use href="#i-services"/></svg>Servicios</button>
       <button class="nav-item hidden" type="button" data-page="team"><svg class="ico" aria-hidden="true"><use href="#i-team"/></svg>Equipo</button>
       <button class="nav-item" type="button" data-page="appearance"><svg class="ico" aria-hidden="true"><use href="#i-appearance"/></svg>Apariencia</button>
+      <button class="nav-item hidden" type="button" data-page="security"><svg class="ico" aria-hidden="true"><use href="#i-security"/></svg>Seguridad</button>
       <button class="nav-item hidden" type="button" data-page="developer"><svg class="ico" aria-hidden="true"><use href="#i-more"/></svg>Developer Mode</button>
       <button class="nav-item" type="button" id="logoutBtn2"><svg class="ico" aria-hidden="true"><use href="#i-logout"/></svg>Cerrar sesión</button>
     </div>
@@ -265,6 +267,7 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
     <symbol id="i-orders" viewBox="0 0 24 24"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4V3h6v1M9 11h6M9 15h4"/></symbol>
     <symbol id="i-finance" viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="13" rx="2.5"/><path d="M3 10h18M16 14.5h2"/></symbol>
     <symbol id="i-appearance" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18Z" fill="currentColor"/></symbol>
+    <symbol id="i-security" viewBox="0 0 24 24"><path d="M12 3 20 6v5c0 5-3.4 8.3-8 10-4.6-1.7-8-5-8-10V6l8-3Z"/><path d="m8.5 12 2.2 2.2 4.8-5"/></symbol>
     <symbol id="i-logout" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></symbol>
     <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.3" fill="currentColor"/><circle cx="12" cy="12" r="1.3" fill="currentColor"/><circle cx="19" cy="12" r="1.3" fill="currentColor"/></symbol>
   </defs></svg>
@@ -278,7 +281,7 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
 
     const $ = (id) => document.getElementById(id);
     const state = { mode: 'login', user: null, company: null, client: null, page: 'dashboard', isPlatformDeveloper: false, developerSimulation: null, effectivePlanCode: null, planEntitlements: {} };
-    const mfaGate = { user: null, mode: null, factorId: null };
+    const mfaGate = { user: null, mode: null, factorId: null, returnPage: 'dashboard' };
     const pageMeta = {
       dashboard: ['Dashboard', 'Resumen de tu espacio de trabajo.', 'VISTA GENERAL'],
       customers: ['Clientes', 'Administra los contactos de tu empresa.', 'GESTIÓN COMERCIAL'],
@@ -287,6 +290,7 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
       orders: ['Pedidos', 'Controla los trabajos y sus fechas de entrega.', 'OPERACIONES'],
       finance: ['Finanzas', 'Consulta los pagos registrados de tu empresa.', 'FINANZAS'],
       appearance: ['Apariencia', 'Personaliza la identidad visual de tu espacio de trabajo.', 'PERSONALIZACIÓN'],
+      security: ['Seguridad', 'Protege el acceso a tu cuenta y administra la verificación en dos pasos.', 'SEGURIDAD DE LA CUENTA'],
       team: ['Equipo', 'Administra los miembros, roles y plazas de tu empresa.', 'GESTIÓN DEL EQUIPO'],
       developer: ['Developer Mode', 'Prueba CORE, FLOW y NEXUS sin realizar pagos.', 'HERRAMIENTAS INTERNAS']
     };
@@ -308,6 +312,7 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
       document.querySelectorAll('[data-page="finance"]').forEach(btn => btn.classList.toggle('hidden', !financeAllowed));
       document.querySelectorAll('[data-page="developer"]').forEach(btn => btn.classList.toggle('hidden', !state.isPlatformDeveloper));
       document.querySelectorAll('[data-page="team"]').forEach(btn => btn.classList.toggle('hidden', !canEditCompany()));
+      document.querySelectorAll('[data-page="security"]').forEach(btn => btn.classList.toggle('hidden', !canEditCompany()));
       const roleLabel = $('sideRole');
       if (roleLabel) roleLabel.textContent = ROLE_LABELS[state.role] || 'Acceso limitado';
     }
@@ -402,8 +407,9 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
       $('mfaCode').focus();
     }
 
-    async function requirePrivilegedMfa(user) {
+    async function requirePrivilegedMfa(user, returnPage = 'dashboard') {
       if (!user?.id || !state.client) return false;
+      mfaGate.returnPage = returnPage;
 
       let required = false;
       const check = await state.client.rpc('shinka_requires_admin_mfa');
@@ -422,13 +428,13 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
 
       const { data: assurance, error: assuranceError } = await state.client.auth.mfa.getAuthenticatorAssuranceLevel();
       if (assuranceError) throw assuranceError;
-      if (assurance?.currentLevel === 'aal2') return false;
 
       const { data: factors, error: factorsError } = await state.client.auth.mfa.listFactors();
       if (factorsError) throw factorsError;
       const verifiedTotp = (factors?.totp || []).filter(factor => factor.status === 'verified');
 
       if (verifiedTotp.length) {
+        if (assurance?.currentLevel === 'aal2') return false;
         try { localStorage.removeItem('shinka_mfa_skipped_' + user.id); } catch (error) {}
         showMfaScreen('challenge', user, verifiedTotp[0]);
         return true;
@@ -469,6 +475,7 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
       mfaGate.user = null;
       mfaGate.mode = null;
       mfaGate.factorId = null;
+      mfaGate.returnPage = 'dashboard';
       state.user = null;
       state.company = null;
       state.role = null;
@@ -507,11 +514,14 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
           if (error) throw error;
         }
         const user = mfaGate.user;
+        const returnPage = mfaGate.returnPage || 'dashboard';
         await loadWorkspace(user);
         try { localStorage.removeItem('shinka_mfa_skipped_' + user.id); } catch (error) {}
+        if (returnPage === 'security') await navigate('security');
         mfaGate.user = null;
         mfaGate.mode = null;
         mfaGate.factorId = null;
+        mfaGate.returnPage = 'dashboard';
       } catch (error) {
         showMessage('mfaMessage', friendlyError(error), 'error');
       } finally {
@@ -525,10 +535,13 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
       clearMessage('mfaMessage');
       setBusy('mfaSkipBtn', true, 'Ahora no, continuar sin 2FA');
       try {
+        const returnPage = mfaGate.returnPage || 'dashboard';
         await loadWorkspace(user);
+        if (returnPage === 'security') await navigate('security');
         mfaGate.user = null;
         mfaGate.mode = null;
         mfaGate.factorId = null;
+        mfaGate.returnPage = 'dashboard';
       } catch (error) {
         showMessage('mfaMessage', friendlyError(error), 'error');
       } finally {
@@ -648,6 +661,10 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
         showMessage('globalMessage', 'Solo el propietario o un administrador puede gestionar el equipo.', 'error');
         return;
       }
+      if (page === 'security' && !canEditCompany()) {
+        showMessage('globalMessage', 'Solo el propietario o un administrador puede gestionar la seguridad de la cuenta.', 'error');
+        return;
+      }
       state.page = page; setNavActive(page); clearMessage('globalMessage'); closeSheet(); syncMore(page); document.title = pageMeta[page][0] + ' – SHINKA'; window.scrollTo(0, 0);
       const [title, desc, pill] = pageMeta[page];
       $('welcomeTitle').textContent = title; $('welcomeDesc').textContent = desc; $('pagePill').textContent = pill;
@@ -662,6 +679,7 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
         if (page === 'team') await renderTeam();
         if (page === 'finance') await renderFinance();
         if (page === 'appearance') await renderAppearance();
+        if (page === 'security') await renderSecurity();
         if (page === 'developer') await renderDeveloper();
       } catch (error) {
         content.innerHTML = '<div class="empty-state">No se pudo cargar esta sección.</div>';
@@ -907,7 +925,7 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
     }
     const sheet = $('moreSheet'), scrim = $('scrim');
     function closeSheet() { sheet.classList.remove('open'); scrim.classList.remove('open'); $('moreBtn').setAttribute('aria-expanded', 'false'); }
-    function syncMore(page) { $('moreBtn').classList.toggle('active', ['leads', 'services', 'appearance', 'team', 'developer'].includes(page)); }
+    function syncMore(page) { $('moreBtn').classList.toggle('active', ['leads', 'services', 'appearance', 'security', 'team', 'developer'].includes(page)); }
     $('moreBtn').addEventListener('click', () => { const o = !sheet.classList.contains('open'); sheet.classList.toggle('open', o); scrim.classList.toggle('open', o); $('moreBtn').setAttribute('aria-expanded', String(o)); });
     scrim.addEventListener('click', closeSheet);
     document.addEventListener('keydown', e => { if (e.key === 'Escape') closeSheet(); });
@@ -998,19 +1016,52 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
     }
     applyTheme();
 
+    /* ===== SHINKA · Seguridad de la cuenta ===== */
+    async function renderSecurity() {
+      if (!canEditCompany()) throw new Error('Solo el propietario o un administrador puede gestionar la seguridad de la cuenta.');
+      const { data: factors, error } = await state.client.auth.mfa.listFactors();
+      if (error) throw error;
+      const verifiedTotp = (factors?.totp || []).filter(factor => factor.status === 'verified');
+      const enabled = verifiedTotp.length > 0;
+      $('pageContent').innerHTML = `
+        <section class="section" style="margin-top:0">
+          <div class="toolbar">
+            <div><h2>Verificación en dos pasos (2FA)</h2><p>Protege esta cuenta con un código temporal de una aplicación autenticadora.</p></div>
+            <span class="badge-status">${enabled ? 'Activada' : 'No activada'}</span>
+          </div>
+          ${enabled
+            ? '<p class="help">La protección está activa. En cada nuevo inicio de sesión tendrás que confirmar el código de tu autenticador.</p><p class="help">Conserva acceso a tu aplicación autenticadora y configura un dispositivo de respaldo.</p>'
+            : '<p class="help">Todavía no has activado 2FA. Puedes seguir usando SHINKA sin ella y activarla desde esta sección cuando lo decidas.</p><button class="btn btn-primary" id="enableMfaFromSecurity" type="button">Activar 2FA ahora</button>'}
+          <div id="securityMessage" class="message" role="status" aria-live="polite"></div>
+        </section>
+        <section class="section">
+          <h2>¿Cómo funciona?</h2>
+          <p>Después de activarla, SHINKA pedirá un código de seis dígitos de tu aplicación autenticadora cada vez que inicies sesión. El código cambia periódicamente.</p>
+        </section>`;
+      $('enableMfaFromSecurity')?.addEventListener('click', async event => {
+        const button = event.currentTarget;
+        button.disabled = true;
+        button.textContent = 'Preparando configuración…';
+        clearMessage('securityMessage');
+        try {
+          try { localStorage.removeItem('shinka_mfa_skipped_' + state.user.id); } catch (error) {}
+          const opened = await requirePrivilegedMfa(state.user, 'security');
+          if (!opened) {
+            await renderSecurity();
+            showMessage('securityMessage', 'La verificación en dos pasos ya está activa.', 'success');
+          }
+        } catch (error) {
+          showMessage('securityMessage', friendlyError(error), 'error');
+          button.disabled = false;
+          button.textContent = 'Activar 2FA ahora';
+        }
+      });
+    }
+
     /* ===== SHINKA · Apariencia ===== */
     async function renderAppearance() {
       const c = state.company, canEdit = canEditCompany(), dis = canEdit ? '' : ' disabled';
       let v = companyPalette(), logo = LOGO_OK.test(c.logo_url || '') ? c.logo_url : null, logoMode = (c.appearance && c.appearance.logoMode) === 'logo' ? 'logo' : 'both';
-      let mfaEnabled = false;
-      if (canEdit) {
-        try {
-          const { data: factors } = await state.client.auth.mfa.listFactors();
-          mfaEnabled = (factors?.totp || []).some(factor => factor.status === 'verified');
-        } catch (error) {
-          console.warn('No se pudo consultar el estado de 2FA:', error);
-        }
-      }
       $('pageContent').innerHTML = `
         <div class="two-col ap">
           <div class="stack">
@@ -1029,8 +1080,7 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
               <div class="presets" id="presets"></div><div class="swatches" id="swatches"></div><p class="help" id="apContrast"></p></section>
             <section class="section"><h2>Modo de pantalla</h2><p>Se guarda en este dispositivo, no en la empresa. En modo oscuro se conservan los neutros de SHINKA y tus colores de marca.</p>
               <div class="seg" role="radiogroup" aria-label="Modo de pantalla">${[['light','Claro'],['dark','Oscuro'],['system','Sistema']].map(([k, l]) => `<button type="button" role="radio" aria-checked="${mode === k}" data-mode="${k}">${l}</button>`).join('')}</div></section>
-            ${canEdit ? `<section class="section"><h2>Seguridad de la cuenta</h2><p>La verificación en dos pasos es opcional. Cuando la activas, necesitarás el código de tu aplicación autenticadora al iniciar sesión.</p>
-              ${mfaEnabled ? '<p class="help">✓ La verificación en dos pasos está activada para esta cuenta.</p>' : '<button class="btn btn-secondary small-btn" id="manageMfaBtn" type="button">Activar verificación en dos pasos</button>'}</section>` : ''}
+
             <div class="actions"><button class="btn btn-primary" id="saveAppearance" type="button"${dis}>Guardar cambios</button><button class="btn btn-secondary" id="resetAppearance" type="button"${dis}>Restaurar identidad SHINKA</button></div>
             <div id="appearanceMessage" class="message" role="status" aria-live="polite"></div>
           </div>
@@ -1040,20 +1090,6 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
               <div class="pv-row"><span class="pv-btn">Guardar</span><span class="pv-tag">Estado</span><span class="pv-link">Ver detalle</span></div></div></div></div></aside>
         </div>`;
       const pv = $('apPreview'), msg = (t, k) => showMessage('appearanceMessage', t, k);
-      $('manageMfaBtn')?.addEventListener('click', async buttonEvent => {
-        const button = buttonEvent.currentTarget;
-        button.disabled = true;
-        button.textContent = 'Preparando…';
-        try {
-          try { localStorage.removeItem('shinka_mfa_skipped_' + state.user.id); } catch (error) {}
-          const opened = await requirePrivilegedMfa(state.user);
-          if (!opened) msg('La verificación en dos pasos ya está activa para esta sesión.', 'success');
-        } catch (error) {
-          msg(friendlyError(error), 'error');
-          button.disabled = false;
-          button.textContent = 'Activar verificación en dos pasos';
-        }
-      });
       const companyNameForm = $('companyNameForm');
       if (companyNameForm) companyNameForm.addEventListener('submit', async event => {
         event.preventDefault();
