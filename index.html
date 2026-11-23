@@ -442,6 +442,7 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
           notice.textContent = 'Prueba gratuita activa · ' + days + (days === 1 ? ' día restante.' : ' días restantes.') + ' Consulta tus opciones en Plan y facturación.';
         }
       }
+      syncRoleNavigation();
       return state.subscriptionAccess;
     }
 
