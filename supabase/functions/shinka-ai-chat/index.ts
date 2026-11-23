@@ -138,6 +138,47 @@ Deno.serve(async (req: Request) => {
     }
   }
 
+  // SHINKA base subscription: a 14-day trial grants access, then a paid active
+  // subscription is required. Business records remain stored after trial expiry.
+  const { data: coreSubscription, error: coreSubscriptionError } = await admin
+    .from("subscriptions")
+    .select("status,trial_starts_at,trial_ends_at,current_period_end")
+    .eq("company_id", companyId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (coreSubscriptionError) {
+    return json({ error: "No pudimos verificar el plan de SHINKA de esta empresa." }, 500);
+  }
+  const accessNow = Date.now();
+  const trialValid = coreSubscription?.status === "trialing"
+    && coreSubscription.trial_starts_at
+    && coreSubscription.trial_ends_at
+    && accessNow >= new Date(coreSubscription.trial_starts_at).getTime()
+    && accessNow < new Date(coreSubscription.trial_ends_at).getTime();
+  const paidValid = coreSubscription?.status === "active"
+    && (!coreSubscription.current_period_end
+      || accessNow < new Date(coreSubscription.current_period_end).getTime());
+
+  let developerBypass = false;
+  if (!trialValid && !paidValid && membership.role === "owner") {
+    const [{ data: developer }, { data: simulation }] = await Promise.all([
+      admin.from("platform_developers").select("user_id")
+        .eq("user_id", user.id).eq("is_active", true).maybeSingle(),
+      admin.from("developer_plan_sessions").select("expires_at")
+        .eq("company_id", companyId).eq("developer_user_id", user.id)
+        .gt("expires_at", new Date().toISOString()).maybeSingle(),
+    ]);
+    developerBypass = !!developer && !!simulation;
+  }
+
+  if (!trialValid && !paidValid && !developerBypass) {
+    return json({
+      error: "La prueba gratuita de SHINKA terminó. Activa un plan para continuar. Tus datos y procesos siguen guardados.",
+      code: "SUBSCRIPTION_REQUIRED",
+    }, 402);
+  }
+
   const { data: company, error: companyError } = await admin
     .from("companies").select("id,name,currency,timezone")
     .eq("id", companyId).maybeSingle();
