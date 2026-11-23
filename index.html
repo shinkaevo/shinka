@@ -358,16 +358,23 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
     function canManagePayments() { return hasRole('owner', 'admin', 'manager'); }
     function canEditCompany() { return hasRole('owner', 'admin'); }
     function syncRoleNavigation() {
-      const financeAllowed = canReadFinance();
-      document.querySelectorAll('[data-page="finance"]').forEach(btn => btn.classList.toggle('hidden', !financeAllowed));
-      document.querySelectorAll('[data-page="developer"]').forEach(btn => btn.classList.toggle('hidden', !state.isPlatformDeveloper));
-      document.querySelectorAll('[data-page="team"]').forEach(btn => btn.classList.toggle('hidden', !canEditCompany()));
-      document.querySelectorAll('[data-page="security"]').forEach(btn => btn.classList.toggle('hidden', !canEditCompany()));
       const billingOnly = state.subscriptionAccess?.has_access === false && !state.isPlatformDeveloper;
       document.querySelectorAll('[data-page]').forEach(button => {
-        if (button.dataset.page !== 'billing' && billingOnly) button.classList.add('hidden');
+        if (button.dataset.page === 'billing') return;
+        if (billingOnly) {
+          button.dataset.subscriptionHidden = 'true';
+          button.classList.add('hidden');
+        } else if (button.dataset.subscriptionHidden === 'true') {
+          delete button.dataset.subscriptionHidden;
+          button.classList.remove('hidden');
+        }
       });
-      document.querySelectorAll('[data-page="billing"]').forEach(button => button.classList.toggle('active', state.page === 'billing'));
+      const financeAllowed = canReadFinance();
+      document.querySelectorAll('[data-page="finance"]').forEach(btn => btn.classList.toggle('hidden', !financeAllowed || billingOnly));
+      document.querySelectorAll('[data-page="developer"]').forEach(btn => btn.classList.toggle('hidden', !state.isPlatformDeveloper || billingOnly));
+      document.querySelectorAll('[data-page="team"]').forEach(btn => btn.classList.toggle('hidden', !canEditCompany() || billingOnly));
+      document.querySelectorAll('[data-page="security"]').forEach(btn => btn.classList.toggle('hidden', !canEditCompany() || billingOnly));
+      document.querySelectorAll('[data-page="billing"]').forEach(btn => btn.classList.toggle('active', state.page === 'billing'));
       const roleLabel = $('sideRole');
       if (roleLabel) roleLabel.textContent = (ROLE_LABELS[state.role] || 'Acceso limitado') + (state.isPlatformDeveloper ? ' · Developer' : '');
     }
