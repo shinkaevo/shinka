@@ -765,8 +765,13 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
     }
     async function navigate(page) {
       if (!pageMeta[page]) return;
-      if (state.subscriptionAccess?.has_access === false && !state.isPlatformDeveloper && page !== 'billing') {
-        page = 'billing';
+      if (page !== 'billing' && !state.isPlatformDeveloper) {
+        try { await refreshSubscriptionAccess(); }
+        catch (error) {
+          showMessage('globalMessage', 'No pudimos verificar tu suscripción. Inténtalo nuevamente.', 'error');
+          return;
+        }
+        if (state.subscriptionAccess?.has_access === false) page = 'billing';
       }
       if (page === 'finance' && !canReadFinance()) {
         showMessage('globalMessage', 'Tu rol no tiene acceso a la sección de Finanzas.', 'error');
@@ -886,7 +891,7 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
     }
 
     async function renderBilling() {
-      const status = state.subscriptionAccess || await refreshSubscriptionAccess();
+      const status = await refreshSubscriptionAccess();
       const { data: plans, error } = await state.client.from('plan_catalog')
         .select('plan_code,display_name,description,monthly_price_cents,currency')
         .eq('is_active', true).order('display_order', { ascending: true });
@@ -1908,6 +1913,15 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
       catch(error){showMessage('companyMessage',friendlyError(error),'error');}finally{setBusy('companySubmit',false,'Crear mi espacio');}
     });
     document.querySelectorAll('[data-page]').forEach(btn=>btn.addEventListener('click',()=>navigate(btn.dataset.page)));
+    document.addEventListener('visibilitychange', async () => {
+      if (document.visibilityState !== 'visible' || !state.user || !state.company || !state.client || state.isPlatformDeveloper) return;
+      try {
+        await refreshSubscriptionAccess();
+        if (state.subscriptionAccess?.has_access === false && state.page !== 'billing') await navigate('billing');
+      } catch (error) {
+        console.warn('No se pudo actualizar el estado de la suscripción:', error);
+      }
+    });
     $('logoutBtn').addEventListener('click',async()=>{const {error}=await state.client.auth.signOut();if(error){alert(friendlyError(error));return;}state.user=null;state.company=null;state.role=null;state.effectivePlanCode=null;state.planEntitlements={};state.subscriptionAccess=null;state.developerSimulation=null;state.isPlatformDeveloper=false;syncRoleNavigation();applyCompanyAppearance();$('authForm').reset();setPasswordVisibility(false);setMode('login');showView('auth');});
 
     (async function boot(){
