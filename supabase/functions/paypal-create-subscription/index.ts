@@ -75,13 +75,16 @@ Deno.serve(async req => {
       const { data } = await admin.from("company_ai_subscriptions").select("addon_plan_code,provider,status,current_period_end,provider_subscription_id,provider_approval_url")
         .eq("company_id", companyId).maybeSingle();
       existing = data;
-      if (existing?.status === "active" && existing.current_period_end && new Date(existing.current_period_end).getTime() > Date.now())
+      const aiPeriodActive = ["active", "trialing"].includes(existing?.status)
+        && existing?.current_period_end && new Date(existing.current_period_end).getTime() > Date.now();
+      if (aiPeriodActive)
         return reply({ error: "SHINKA IA ya está activo. Cambiar CORE, FLOW o NEXUS no modifica sus créditos ni su suscripción; el complemento se administra por separado." }, 409, origin);
-      if (existing?.provider === "paypal" && existing?.provider_subscription_id) {
-        if (existing.provider_approval_url) {
+      if (existing?.provider === "paypal" && existing?.provider_subscription_id
+          && ["incomplete", "past_due", "paused"].includes(existing.status)) {
+        if (existing.addon_plan_code === planCode && existing.provider_approval_url) {
           return reply({ approval_url: existing.provider_approval_url, subscription_id: existing.provider_subscription_id, reused: true }, 200, origin);
         }
-        return reply({ error: "Ya existe una suscripción PayPal pendiente para SHINKA IA. No se creará otro cobro." }, 409, origin);
+        return reply({ error: "Ya existe un intento o un pago pendiente de SHINKA IA. No se creará otro cobro hasta resolverlo." }, 409, origin);
       }
     }
 
@@ -96,8 +99,11 @@ Deno.serve(async req => {
         }
         return reply({ error: "Este plan ya está vinculado a tu suscripción actual." }, 409, origin);
       }
-      if (existing.paypal_pending_plan_code === planCode && existing.provider_approval_url) {
-        return reply({ approval_url: existing.provider_approval_url, subscription_id: existing.provider_subscription_id, reused: true }, 200, origin);
+      if (existing.paypal_pending_plan_code === planCode) {
+        if (existing.provider_approval_url) {
+          return reply({ approval_url: existing.provider_approval_url, subscription_id: existing.provider_subscription_id, reused: true }, 200, origin);
+        }
+        return reply({ error: "Tu cambio de plan ya fue enviado a PayPal y está esperando confirmación. No lo repitas." }, 409, origin);
       }
       const reviseResponse = await fetch(base + "/v1/billing/subscriptions/" + encodeURIComponent(existing.provider_subscription_id) + "/revise", {
         method: "POST",
