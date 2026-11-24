@@ -82,7 +82,7 @@ Deno.serve(async req => {
 
     if (subId) {
       const { data: core, error: coreErr } = await admin.from("subscriptions")
-        .select("id,company_id,status,trial_starts_at,trial_ends_at,current_period_start,current_period_end")
+        .select("id,company_id,plan_code,status,trial_starts_at,trial_ends_at,current_period_start,current_period_end,paypal_pending_plan_code")
         .eq("provider", "paypal").eq("provider_subscription_id", subId)
         .order("updated_at", { ascending: false }).limit(1).maybeSingle();
       const { data: ai, error: aiErr } = await admin.from("company_ai_subscriptions")
@@ -97,65 +97,104 @@ Deno.serve(async req => {
 
       if (eventType === "BILLING.SUBSCRIPTION.ACTIVATED" || eventType === "BILLING.SUBSCRIPTION.UPDATED") {
         if (!details) throw new Error("PayPal subscription details are missing.");
-        const start = toIso(details.start_time) || new Date().toISOString();
-        const isScheduled = new Date(start).getTime() > Date.now() + 60_000;
-        const periodStart = isScheduled ? start : (toIso(details.billing_info?.last_payment?.time) || start);
-        const periodEnd = toIso(details.billing_info?.next_billing_time) || plusMonth(periodStart);
+        const startTime = toIso(details.start_time) || new Date().toISOString();
+        const scheduled = new Date(startTime).getTime() > Date.now() + 60_000;
+
         if (core) {
-          const values: Record<string,unknown> = {
-            status: isScheduled ? "trialing" : "active",
+          const { data: mappedPlan, error: mappedPlanError } = await admin.from("plan_catalog")
+            .select("plan_code").eq("paypal_plan_id", String(details.plan_id || ""))
+            .eq("paypal_environment", env).maybeSingle();
+          if (mappedPlanError) throw new Error("Could not map the PayPal plan to SHINKA.");
+          const nextStatus = core.status === "active" ? "active"
+            : core.status === "trialing" && core.trial_ends_at && new Date(core.trial_ends_at).getTime() > Date.now() ? "trialing"
+            : scheduled ? "trialing" : "incomplete";
+          const values: Record<string, unknown> = {
+            status: nextStatus,
             provider_customer_id: details.subscriber?.payer_id || null,
-            current_period_start: periodStart, current_period_end: periodEnd,
-            cancel_at_period_end: false, canceled_at: null, provider_approval_url: null,
+            provider_approval_url: null,
             updated_at: new Date().toISOString(),
           };
-          if (isScheduled) {
+          if (scheduled && nextStatus === "trialing") {
             values.trial_starts_at = core.trial_starts_at || new Date().toISOString();
-            values.trial_ends_at = start;
-          } else { values.trial_starts_at = null; values.trial_ends_at = null; }
+            values.trial_ends_at = startTime;
+            values.current_period_start = startTime;
+            values.current_period_end = startTime;
+          }
+          if (mappedPlan?.plan_code && mappedPlan.plan_code !== core.plan_code) {
+            values.paypal_pending_plan_code = mappedPlan.plan_code;
+          }
           const { error } = await admin.from("subscriptions").update(values).eq("id", core.id);
-          if (error) throw new Error("Could not activate SHINKA subscription.");
+          if (error) throw new Error("Could not save the SHINKA subscription approval.");
         } else if (ai) {
+          // Approval alone is not enough to grant paid AI access. Wait for PAYMENT.SALE.COMPLETED.
           const { error } = await admin.from("company_ai_subscriptions").update({
-            status: isScheduled ? "trialing" : "active", provider_customer_id: details.subscriber?.payer_id || null,
-            current_period_start: periodStart, current_period_end: periodEnd, cancel_at_period_end: false,
-            canceled_at: null, provider_approval_url: null, updated_at: new Date().toISOString(),
+            status: ai.status === "active" ? "active" : "incomplete",
+            provider_customer_id: details.subscriber?.payer_id || null,
+            provider_approval_url: null,
+            updated_at: new Date().toISOString(),
           }).eq("company_id", ai.company_id);
-          if (error) throw new Error("Could not activate SHINKA IA.");
+          if (error) throw new Error("Could not save the SHINKA IA subscription approval.");
         }
       } else if (eventType === "PAYMENT.SALE.COMPLETED" && details) {
         const paidAt = toIso(resource.create_time || resource.update_time || details.billing_info?.last_payment?.time) || new Date().toISOString();
         const nextEnd = toIso(details.billing_info?.next_billing_time);
         if (core) {
-          const oldStart = toIso(core.current_period_start), oldEnd = toIso(core.current_period_end);
-          const isFirst = core.status === "trialing" && oldStart && new Date(paidAt).getTime() >= new Date(oldStart).getTime() - 60_000;
-          const isRenewal = oldEnd && new Date(paidAt).getTime() >= new Date(oldEnd).getTime() - 12 * 60 * 60 * 1000;
-          if (isFirst || isRenewal) {
-            const periodStart = isRenewal ? oldEnd! : paidAt;
+          const oldEnd = toIso(core.current_period_end);
+          const trialEnd = toIso(core.trial_ends_at);
+          const paidMs = new Date(paidAt).getTime();
+          const firstPayment = core.status === "incomplete"
+            || (core.status === "trialing" && !!trialEnd && paidMs >= new Date(trialEnd).getTime() - 60_000);
+          const renewal = ["active", "past_due"].includes(core.status)
+            && !!oldEnd && paidMs >= new Date(oldEnd).getTime() - 12 * 60 * 60 * 1000;
+          if (firstPayment || renewal) {
+            const { data: mappedPlan, error: mappedPlanError } = await admin.from("plan_catalog")
+              .select("plan_code,monthly_price_cents,currency").eq("paypal_plan_id", String(details.plan_id || ""))
+              .eq("paypal_environment", env).maybeSingle();
+            if (mappedPlanError) throw new Error("Could not map the successful PayPal payment to a SHINKA plan.");
+            const nextPlanCode = mappedPlan?.plan_code || core.paypal_pending_plan_code || core.plan_code;
+            const periodStart = renewal && oldEnd ? oldEnd : paidAt;
             const { error } = await admin.from("subscriptions").update({
-              status: "active", current_period_start: periodStart, current_period_end: nextEnd || plusMonth(periodStart),
-              trial_starts_at: null, trial_ends_at: null, provider_approval_url: null, updated_at: new Date().toISOString(),
+              status: "active",
+              plan_code: nextPlanCode,
+              paypal_pending_plan_code: null,
+              unit_amount_cents: mappedPlan?.monthly_price_cents,
+              currency: mappedPlan?.currency || "USD",
+              current_period_start: periodStart,
+              current_period_end: nextEnd || plusMonth(periodStart),
+              trial_starts_at: null,
+              trial_ends_at: null,
+              provider_approval_url: null,
+              updated_at: new Date().toISOString(),
             }).eq("id", core.id);
-            if (error) throw new Error("Could not renew SHINKA subscription.");
+            if (error) throw new Error("Could not activate or renew the SHINKA subscription.");
           }
         } else if (ai) {
-          const oldStart = toIso(ai.current_period_start), oldEnd = toIso(ai.current_period_end);
-          const isFirst = !oldStart || !oldEnd;
-          const isRenewal = oldEnd && new Date(paidAt).getTime() >= new Date(oldEnd).getTime() - 12 * 60 * 60 * 1000;
-          if (isFirst || isRenewal) {
-            const periodStart = isRenewal ? oldEnd! : paidAt;
+          const oldEnd = toIso(ai.current_period_end);
+          const paidMs = new Date(paidAt).getTime();
+          const firstPayment = ["incomplete", "trialing", "past_due"].includes(ai.status) && !oldEnd;
+          const renewal = ["active", "past_due"].includes(ai.status)
+            && !!oldEnd && paidMs >= new Date(oldEnd).getTime() - 12 * 60 * 60 * 1000;
+          if (firstPayment || renewal) {
+            const periodStart = renewal && oldEnd ? oldEnd : paidAt;
             const { error } = await admin.from("company_ai_subscriptions").update({
-              status: "active", current_period_start: periodStart, current_period_end: nextEnd || plusMonth(periodStart),
-              provider_approval_url: null, updated_at: new Date().toISOString(),
+              status: "active",
+              current_period_start: periodStart,
+              current_period_end: nextEnd || plusMonth(periodStart),
+              provider_approval_url: null,
+              updated_at: new Date().toISOString(),
             }).eq("company_id", ai.company_id);
-            if (error) throw new Error("Could not renew SHINKA IA.");
+            if (error) throw new Error("Could not activate or renew SHINKA IA.");
           }
         }
+      }
       } else if (eventType === "BILLING.SUBSCRIPTION.CANCELLED") {
         if (core) {
-          const paidThrough = core.current_period_end && new Date(core.current_period_end).getTime() > Date.now();
+          const trialThrough = core.status === "trialing" && core.trial_ends_at && new Date(core.trial_ends_at).getTime() > Date.now();
+          const paidThrough = core.current_period_end && new Date(core.current_period_end).getTime() > Date.now() && core.status !== "incomplete";
+          const keepUntilEnd = !!trialThrough || !!paidThrough;
           const { error } = await admin.from("subscriptions").update({
-            status: paidThrough ? "active" : "canceled", cancel_at_period_end: !!paidThrough,
+            status: trialThrough ? "trialing" : paidThrough ? "active" : "canceled",
+            cancel_at_period_end: keepUntilEnd,
             canceled_at: new Date().toISOString(), updated_at: new Date().toISOString(),
           }).eq("id", core.id);
           if (error) throw new Error("Could not save SHINKA cancellation.");
