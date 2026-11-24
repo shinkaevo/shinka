@@ -984,10 +984,10 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
         status?.has_access ? 'Tu suscripción está activa.' :
         'Tu período de prueba terminó.';
       const heroText = isTrial
-        ? 'Tienes 7 días para probar SHINKA. Puedes autorizar ahora tu plan y el primer cobro comenzará al terminar la prueba.'
+        ? 'Tienes 7 días para probar SHINKA. Puedes mantener el acceso con una suscripción o canjear un serial válido.'
         : status?.has_access
           ? 'Tu espacio de trabajo tiene acceso activo. Los cambios de CORE, FLOW o NEXUS no modifican tu complemento independiente de SHINKA IA.'
-          : 'Para volver a utilizar clientes, pedidos, servicios y finanzas, activa un plan. Tus datos y procesos se conservan aunque el acceso se pause.';
+          : 'Para volver a utilizar clientes, pedidos, servicios y finanzas, activa una suscripción o canjea un serial válido. Tus datos y procesos se conservan aunque el acceso se pause.';
 
       const cards = plans.map(plan => {
         const price = new Intl.NumberFormat('es-DO', {
