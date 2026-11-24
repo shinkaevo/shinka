@@ -1,208 +1,274 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 
-const ORIGIN = "https://shinkaevo.github.io";
-function reply(data: unknown, status = 200, origin = ORIGIN) {
-  return new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json",
-    "Access-Control-Allow-Origin": origin, "Access-Control-Allow-Headers": "authorization, apikey, content-type, x-client-info",
-    "Access-Control-Allow-Methods": "POST, OPTIONS", "Cache-Control": "no-store", "Vary": "Origin" } });
+const APP_ORIGIN = "https://shinkaevo.github.io";
+function response(data: unknown, status = 200) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: {
+      "Content-Type": "application/json",
+      "Access-Control-Allow-Origin": APP_ORIGIN,
+      "Access-Control-Allow-Headers": "authorization, apikey, content-type, x-client-info",
+      "Access-Control-Allow-Methods": "POST, OPTIONS",
+      "Cache-Control": "no-store",
+    },
+  });
 }
-function secret(name: string, jsonName?: string, legacy: string[] = []): string | null {
-  const direct = Deno.env.get(name);
-  if (direct) return direct;
+async function paypalRequest(base: string, token: string, path: string, method = "GET", body?: unknown) {
+  const headers: Record<string, string> = {
+    Authorization: "Bearer " + token,
+    Accept: "application/json",
+  };
+  if (body !== undefined) headers["Content-Type"] = "application/json";
+  const res = await fetch(base + path, {
+    method,
+    headers,
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.message || ("PayPal HTTP " + res.status));
+  return data;
+}
+async function getToken(base: string, clientId: string, clientSecret: string) {
+  const res = await fetch(base + "/v1/oauth2/token", {
+    method: "POST",
+    headers: {
+      Authorization: "Basic " + btoa(clientId + ":" + clientSecret),
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: "grant_type=client_credentials",
+  });
+  const data = await res.json();
+  if (!res.ok || !data.access_token) throw new Error("PayPal no pudo autorizar la aplicación.");
+  return String(data.access_token);
+}
 
-  if (jsonName) {
-    const raw = Deno.env.get(jsonName);
-    if (raw) {
-      try {
-        const parsed: unknown = JSON.parse(raw);
-        if (typeof parsed === "string") return parsed;
-        if (parsed && typeof parsed === "object") {
-          const record = parsed as Record<string, unknown>;
-          if (typeof record.default === "string") return record.default;
-          const first = Object.values(record).find((value) => typeof value === "string");
-          if (typeof first === "string") return first;
-        }
-      } catch (parseError) {
-        return raw;
-      }
-    }
+Deno.serve(async (req: Request) => {
+  if (req.method === "OPTIONS") return response({ ok: true });
+  if (req.method !== "POST") return response({ error: "Método no permitido." }, 405);
+  if (req.headers.get("Origin") !== APP_ORIGIN) return response({ error: "Origen no permitido." }, 403);
+
+  const auth = req.headers.get("Authorization") || "";
+  if (!auth.startsWith("Bearer ")) return response({ error: "Inicia sesión para continuar." }, 401);
+
+  const supabaseUrl = Deno.env.get("SUPABASE_URL");
+  const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
+  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  const clientId = Deno.env.get("PAYPAL_CLIENT_ID");
+  const clientSecret = Deno.env.get("PAYPAL_CLIENT_SECRET");
+  const environment = (Deno.env.get("PAYPAL_ENVIRONMENT") || "sandbox").toLowerCase();
+  if (!supabaseUrl || !anonKey || !serviceKey) return response({ error: "Faltan claves del servidor Supabase." }, 503);
+  if (!clientId || !clientSecret) return response({ error: "PayPal no está configurado en Supabase." }, 503);
+  if (environment !== "sandbox" && environment !== "live") return response({ error: "PAYPAL_ENVIRONMENT debe ser sandbox o live." }, 503);
+
+  const body = await req.json();
+  const companyId = String(body?.company_id || "");
+  const productType = String(body?.product_type || "");
+  const planCode = String(body?.plan_code || "");
+  if (!/^[0-9a-f-]{36}$/i.test(companyId)) return response({ error: "La empresa indicada no es válida." }, 400);
+  if (productType !== "core" && productType !== "ai") return response({ error: "El producto no es válido." }, 400);
+  if (!/^[a-z0-9_-]{2,30}$/i.test(planCode)) return response({ error: "El plan no es válido." }, 400);
+
+  const userClient = createClient(supabaseUrl, anonKey, {
+    global: { headers: { Authorization: auth } },
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+  const admin = createClient(supabaseUrl, serviceKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+
+  const userResult = await userClient.auth.getUser();
+  const user = userResult.data.user;
+  if (userResult.error || !user) return response({ error: "Tu sesión no es válida." }, 401);
+
+  const memberResult = await admin.from("company_members")
+    .select("role")
+    .eq("company_id", companyId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (memberResult.error || !memberResult.data || memberResult.data.role !== "owner") {
+    return response({ error: "Solo el propietario del espacio puede contratar." }, 403);
   }
 
-  for (const legacyName of legacy) {
-    const value = Deno.env.get(legacyName);
-    if (value) return value;
+  const mfaResult = await userClient.rpc("shinka_company_mfa_access_allowed", { p_company_id: companyId });
+  if (mfaResult.error || mfaResult.data !== true) {
+    return response({ error: "Completa la verificación de seguridad antes de contratar." }, 403);
   }
-  return null;
-}
 
-async function tokenFor(base: string, id: string, key: string) {
-  const r = await fetch(base + "/v1/oauth2/token", { method: "POST",
-    headers: { Authorization: "Basic " + btoa(id + ":" + key), "Content-Type": "application/x-www-form-urlencoded" },
-    body: "grant_type=client_credentials", signal: AbortSignal.timeout(20000) });
-  const d = await r.json().catch(() => ({}));
-  if (!r.ok || !d.access_token) throw new Error("PayPal no pudo autorizar la aplicación.");
-  return d.access_token as string;
-}
+  const configResult = await admin.from("billing_provider_config")
+    .select("environment")
+    .eq("provider", "paypal")
+    .maybeSingle();
+  if (configResult.error || !configResult.data || configResult.data.environment !== environment) {
+    return response({ error: "El catálogo PayPal todavía no está preparado para este entorno." }, 503);
+  }
 
-Deno.serve(async req => {
-  const origin = req.headers.get("Origin") || ORIGIN;
-  if (origin !== ORIGIN) return reply({ error: "Origen no permitido." }, 403, ORIGIN);
-  if (req.method === "OPTIONS") return reply({ ok: true }, 200, ORIGIN);
-  if (req.method !== "POST") return reply({ error: "Método no permitido." }, 405, origin);
-  try {
-    const auth = req.headers.get("Authorization") || "";
-    if (!auth.startsWith("Bearer ")) return reply({ error: "Inicia sesión para continuar." }, 401, origin);
-    const url = Deno.env.get("SUPABASE_URL");
-    const pub = secret("SUPABASE_PUBLISHABLE_KEY", "SUPABASE_PUBLISHABLE_KEYS", ["SUPABASE_ANON_KEY"]);
-    const svc = secret("SUPABASE_SERVICE_ROLE_KEY", "SUPABASE_SECRET_KEYS", ["SUPABASE_SECRET_KEY"]);
-    const clientId = Deno.env.get("PAYPAL_CLIENT_ID"), clientSecret = Deno.env.get("PAYPAL_CLIENT_SECRET");
-    const env = (Deno.env.get("PAYPAL_ENVIRONMENT") || "sandbox").toLowerCase();
-    if (!url || !pub || !svc) return reply({ error: "La conexión segura con Supabase no está configurada." }, 503, origin);
-    if (!clientId || !clientSecret) return reply({ error: "PayPal no está configurado en el servidor." }, 503, origin);
-    if (env !== "sandbox" && env !== "live") return reply({ error: "Entorno PayPal no válido." }, 503, origin);
-    let body: any; try { body = await req.json(); } catch { return reply({ error: "JSON inválido." }, 400, origin); }
-    const companyId = String(body?.company_id || ""), kind = String(body?.product_type || ""), code = String(body?.plan_code || "");
-    if (!/^[0-9a-f-]{36}$/i.test(companyId) || !["core","ai"].includes(kind) || !/^[a-z0-9_-]{2,30}$/i.test(code))
-      return reply({ error: "Empresa, producto o plan no válido." }, 400, origin);
+  const table = productType === "core" ? "plan_catalog" : "ai_addon_catalog";
+  const planResult = await admin.from(table)
+    .select("plan_code,display_name,monthly_price_cents,currency,paypal_plan_id,paypal_environment")
+    .eq("plan_code", planCode)
+    .eq("is_active", true)
+    .maybeSingle();
+  const plan = planResult.data;
+  if (planResult.error || !plan) return response({ error: "No encontramos ese plan." }, 404);
+  if (!plan.paypal_plan_id || plan.paypal_environment !== environment) {
+    return response({ error: "Este plan todavía no está preparado en PayPal." }, 409);
+  }
 
-    const userClient = createClient(url, pub, { global: { headers: { Authorization: auth } }, auth: { persistSession: false, autoRefreshToken: false } });
-    const admin = createClient(url, svc, { auth: { persistSession: false, autoRefreshToken: false } });
-    const { data: ud, error: ue } = await userClient.auth.getUser();
-    if (ue || !ud.user) return reply({ error: "Tu sesión no es válida." }, 401, origin);
-    const { data: member } = await admin.from("company_members").select("role").eq("company_id", companyId).eq("user_id", ud.user.id).maybeSingle();
-    if (!member || member.role !== "owner") return reply({ error: "Solo el propietario de la empresa puede contratar." }, 403, origin);
-    const { data: mfa, error: mfaError } = await userClient.rpc("shinka_company_mfa_access_allowed", { p_company_id: companyId });
-    if (mfaError || mfa !== true) return reply({ error: "Completa la verificación de seguridad antes de contratar." }, 403, origin);
+  const base = environment === "live" ? "https://api-m.paypal.com" : "https://api-m.sandbox.paypal.com";
+  const token = await getToken(base, clientId, clientSecret);
+  let existing: any = null;
 
-    const { data: config } = await admin.from("billing_provider_config").select("environment").eq("provider","paypal").maybeSingle();
-    if (!config || config.environment !== env) return reply({ error: "El catálogo PayPal aún no está preparado para este entorno." }, 503, origin);
-    const table = kind === "core" ? "plan_catalog" : "ai_addon_catalog";
-    const { data: plan, error: planError } = await admin.from(table)
-      .select("plan_code,display_name,monthly_price_cents,currency,paypal_plan_id,paypal_environment")
-      .eq("plan_code", code).eq("is_active", true).maybeSingle();
-    if (planError || !plan) return reply({ error: "No encontramos ese plan." }, 404, origin);
-    if (!plan.paypal_plan_id || plan.paypal_environment !== env) return reply({ error: "El plan todavía no está configurado en PayPal." }, 409, origin);
+  if (productType === "core") {
+    const existingResult = await admin.from("subscriptions")
+      .select("id,plan_code,provider,status,trial_ends_at,current_period_end,provider_subscription_id,provider_approval_url,paypal_pending_plan_code")
+      .eq("company_id", companyId)
+      .order("created_at", { ascending: false })
+      .limit(1);
+    if (existingResult.error) throw new Error("No pudimos leer tu suscripción actual.");
+    existing = existingResult.data?.[0] || null;
 
-    let existing: any = null;
-    if (kind === "core") {
-      const { data } = await admin.from("subscriptions").select("id,plan_code,provider,status,trial_starts_at,trial_ends_at,current_period_start,current_period_end,provider_subscription_id,provider_approval_url,paypal_pending_plan_code")
-        .eq("company_id", companyId).order("created_at", { ascending: false }).limit(1);
-      existing = data?.[0] || null;
-      // A paid PayPal plan can be upgraded/downgraded in-place. The AI add-on
-      // remains an independent subscription and is never changed by this flow.
-    } else {
-      const { data } = await admin.from("company_ai_subscriptions").select("addon_plan_code,provider,status,current_period_end,provider_subscription_id,provider_approval_url")
-        .eq("company_id", companyId).maybeSingle();
-      existing = data;
-      const aiPeriodActive = ["active", "trialing"].includes(existing?.status)
-        && existing?.current_period_end && new Date(existing.current_period_end).getTime() > Date.now();
-      if (aiPeriodActive)
-        return reply({ error: "SHINKA IA ya está activo. Cambiar CORE, FLOW o NEXUS no modifica sus créditos ni su suscripción; el complemento se administra por separado." }, 409, origin);
-      if (existing?.provider === "paypal" && existing?.provider_subscription_id
-          && ["incomplete", "past_due", "paused"].includes(existing.status)) {
-        if (existing.addon_plan_code === planCode && existing.provider_approval_url) {
-          return reply({ approval_url: existing.provider_approval_url, subscription_id: existing.provider_subscription_id, reused: true }, 200, origin);
-        }
-        return reply({ error: "Ya existe un intento o un pago pendiente de SHINKA IA. No se creará otro cobro hasta resolverlo." }, 409, origin);
-      }
-    }
+    const hasCurrentAccess = ["active", "trialing"].includes(existing?.status)
+      && ((!existing?.current_period_end && existing?.status === "active")
+        || (existing?.current_period_end && new Date(existing.current_period_end).getTime() > Date.now())
+        || (existing?.status === "trialing" && existing?.trial_ends_at && new Date(existing.trial_ends_at).getTime() > Date.now()));
 
-    const base = env === "live" ? "https://api-m.paypal.com" : "https://api-m.sandbox.paypal.com";
-    const token = await tokenFor(base, clientId, clientSecret);
-
-    if (kind === "core" && existing?.provider === "paypal" && existing?.provider_subscription_id
+    if (existing?.provider === "paypal" && existing?.provider_subscription_id
         && ["active", "trialing", "incomplete"].includes(existing.status)) {
-      if (existing.plan_code === planCode && !existing.paypal_pending_plan_code) {
-        if (existing.provider_approval_url) {
-          return reply({ approval_url: existing.provider_approval_url, subscription_id: existing.provider_subscription_id, reused: true }, 200, origin);
-        }
-        return reply({ error: "Este plan ya está vinculado a tu suscripción actual." }, 409, origin);
-      }
       if (existing.paypal_pending_plan_code === planCode) {
         if (existing.provider_approval_url) {
-          return reply({ approval_url: existing.provider_approval_url, subscription_id: existing.provider_subscription_id, reused: true }, 200, origin);
+          return response({ approval_url: existing.provider_approval_url, subscription_id: existing.provider_subscription_id, reused: true });
         }
-        return reply({ error: "Tu cambio de plan ya fue enviado a PayPal y está esperando confirmación. No lo repitas." }, 409, origin);
+        return response({ error: "Tu cambio de plan ya está pendiente de confirmación. No lo repitas." }, 409);
       }
-      const reviseResponse = await fetch(base + "/v1/billing/subscriptions/" + encodeURIComponent(existing.provider_subscription_id) + "/revise", {
-        method: "POST",
-        headers: { Authorization: "Bearer " + token, "Content-Type": "application/json", Accept: "application/json", "PayPal-Request-Id": crypto.randomUUID() },
-        body: JSON.stringify({ plan_id: plan.paypal_plan_id }),
-        signal: AbortSignal.timeout(25000),
-      });
-      const reviseData = await reviseResponse.json().catch(() => ({}));
-      if (!reviseResponse.ok) throw new Error(reviseData.message || "PayPal no pudo preparar el cambio de plan.");
-      const approvalUrl = String((reviseData.links || []).find((x: any) => x?.rel === "approve")?.href || "");
-      if (!approvalUrl) throw new Error("PayPal no devolvió el enlace para confirmar el cambio de plan.");
-      const { error: reviseSaveError } = await admin.from("subscriptions").update({
+      if (existing.plan_code === planCode) {
+        if (existing.provider_approval_url) {
+          return response({ approval_url: existing.provider_approval_url, subscription_id: existing.provider_subscription_id, reused: true });
+        }
+        return response({ error: "Este plan ya está vinculado a tu suscripción actual." }, 409);
+      }
+
+      const revise = await paypalRequest(base, token,
+        "/v1/billing/subscriptions/" + encodeURIComponent(existing.provider_subscription_id) + "/revise",
+        "POST",
+        { plan_id: plan.paypal_plan_id });
+      const approvalUrl = String((revise.links || []).find((item: any) => item.rel === "approve")?.href || "");
+      if (!approvalUrl) throw new Error("PayPal no devolvió el enlace para confirmar el cambio.");
+      const updateResult = await admin.from("subscriptions").update({
         paypal_pending_plan_code: planCode,
         provider_approval_url: approvalUrl,
         updated_at: new Date().toISOString(),
       }).eq("id", existing.id);
-      if (reviseSaveError) throw new Error("PayPal preparó el cambio, pero SHINKA no pudo guardar la confirmación. No repitas el intento; contacta al soporte.");
-      return reply({ approval_url: approvalUrl, subscription_id: existing.provider_subscription_id, product_type: "core", plan_code: planCode, revised: true }, 200, origin);
+      if (updateResult.error) throw new Error("PayPal preparó el cambio, pero SHINKA no pudo guardarlo. No repitas el intento.");
+      return response({
+        approval_url: approvalUrl,
+        subscription_id: existing.provider_subscription_id,
+        product_type: "core",
+        plan_code: planCode,
+        revised: true,
+      });
     }
 
-    if (kind === "core" && existing?.status === "active"
-        && (!existing.current_period_end || new Date(existing.current_period_end).getTime() > Date.now())
-        && existing.provider !== "paypal") {
-      return reply({ error: "Esta suscripción fue creada con otro método. No crearemos una segunda para evitar dobles cobros; el adulto administrador debe gestionar el cambio desde el proveedor actual." }, 409, origin);
+    if (hasCurrentAccess && existing?.provider !== "shinka_free_trial" && existing?.provider !== "paypal") {
+      return response({ error: "La suscripción actual utiliza otro proveedor. El adulto administrador debe gestionar el cambio sin crear un segundo cobro." }, 409);
     }
-    if (kind === "core" && existing?.provider === "paypal" && existing?.provider_subscription_id
+    if (existing?.provider === "paypal" && existing?.provider_subscription_id
         && ["past_due", "paused"].includes(existing.status)) {
-      return reply({ error: "La suscripción actual tiene un pago pendiente. Resuelve ese estado en PayPal antes de crear otro plan." }, 409, origin);
+      return response({ error: "Hay un pago pendiente en PayPal. Resuelve ese estado antes de contratar otro plan." }, 409);
     }
+  } else {
+    const existingResult = await admin.from("company_ai_subscriptions")
+      .select("addon_plan_code,provider,status,current_period_end,provider_subscription_id,provider_approval_url")
+      .eq("company_id", companyId)
+      .maybeSingle();
+    if (existingResult.error) throw new Error("No pudimos leer tu suscripción de SHINKA IA.");
+    existing = existingResult.data;
 
-    const appUrl = "https://shinkaevo.github.io/shinka/";
-    const payload: Record<string, unknown> = {
-      plan_id: plan.paypal_plan_id,
-      custom_id: "SHINKA|" + kind + "|" + companyId + "|" + code,
-      application_context: {
-        brand_name: "SHINKA", locale: "es-DO", shipping_preference: "NO_SHIPPING", user_action: "SUBSCRIBE_NOW",
-        payment_method: { payer_selected: "PAYPAL", payee_preferred: "IMMEDIATE_PAYMENT_REQUIRED" },
-        return_url: appUrl + "?paypal=success&product=" + kind,
-        cancel_url: appUrl + "?paypal=cancelled&product=" + kind,
-      },
-    };
-    if (kind === "core" && existing?.status === "trialing" && existing?.trial_ends_at) {
-      const end = new Date(existing.trial_ends_at);
-      if (end.getTime() > Date.now() + 60_000) payload.start_time = end.toISOString();
+    const aiActive = ["active", "trialing"].includes(existing?.status)
+      && existing?.current_period_end
+      && new Date(existing.current_period_end).getTime() > Date.now();
+    if (aiActive) {
+      return response({ error: "SHINKA IA ya tiene una suscripción activa. CORE, FLOW y NEXUS no modifican sus créditos ni su facturación." }, 409);
     }
-
-    const response = await fetch(base + "/v1/billing/subscriptions", { method: "POST",
-      headers: { Authorization: "Bearer " + token, "Content-Type": "application/json", Accept: "application/json", "PayPal-Request-Id": crypto.randomUUID() },
-      body: JSON.stringify(payload), signal: AbortSignal.timeout(25000) });
-    const result = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(result.message || "PayPal rechazó la creación de la suscripción.");
-    const subscriptionId = String(result.id || "");
-    const approvalUrl = String((result.links || []).find((x: any) => x?.rel === "approve")?.href || "");
-    if (!subscriptionId || !approvalUrl) throw new Error("PayPal no devolvió el enlace de aprobación.");
-
-    if (kind === "core") {
-      const trialActive = existing?.status === "trialing" && existing?.trial_ends_at && new Date(existing.trial_ends_at).getTime() > Date.now();
-      const values = {
-        company_id: companyId, plan_code: existing?.plan_code || code, provider: "paypal", provider_subscription_id: subscriptionId,
-        provider_approval_url: approvalUrl, paypal_pending_plan_code: code,
-        status: trialActive ? "trialing" : "incomplete", billing_interval: "month",
-        currency: plan.currency || "USD", unit_amount_cents: Number(plan.monthly_price_cents), updated_at: new Date().toISOString(),
-      };
-      const write = existing?.id
-        ? await admin.from("subscriptions").update(values).eq("id", existing.id)
-        : await admin.from("subscriptions").insert(values);
-      if (write.error) throw new Error("PayPal creó la suscripción, pero SHINKA no pudo guardar el intento. No vuelvas a pagar; contacta al soporte.");
-    } else {
-      const { error } = await admin.from("company_ai_subscriptions").upsert({
-        company_id: companyId, addon_plan_code: code, status: "incomplete", provider: "paypal",
-        provider_subscription_id: subscriptionId, provider_approval_url: approvalUrl,
-        current_period_start: null, current_period_end: null, cancel_at_period_end: false, canceled_at: null,
-        updated_at: new Date().toISOString(),
-      }, { onConflict: "company_id" });
-      if (error) throw new Error("PayPal creó la suscripción, pero SHINKA no pudo guardar el intento.");
+    if (existing?.provider === "paypal" && existing?.provider_subscription_id
+        && ["incomplete", "past_due", "paused"].includes(existing.status)) {
+      if (existing.addon_plan_code === planCode && existing.provider_approval_url) {
+        return response({ approval_url: existing.provider_approval_url, subscription_id: existing.provider_subscription_id, reused: true });
+      }
+      return response({ error: "Ya existe un intento o pago pendiente de SHINKA IA. No se creará otro cobro." }, 409);
     }
-    return reply({ approval_url: approvalUrl, subscription_id: subscriptionId, product_type: kind, plan_code: code }, 200, origin);
-  } catch (e) {
-    console.error("paypal-create-subscription:", e instanceof Error ? e.message : "unknown");
-    return reply({ error: e instanceof Error ? e.message : "No pudimos iniciar PayPal." }, 500, origin);
   }
+
+  const appUrl = "https://shinkaevo.github.io/shinka/";
+  const payload: Record<string, unknown> = {
+    plan_id: plan.paypal_plan_id,
+    custom_id: "SHINKA|" + productType + "|" + companyId + "|" + planCode,
+    application_context: {
+      brand_name: "SHINKA",
+      locale: "es-DO",
+      shipping_preference: "NO_SHIPPING",
+      user_action: "SUBSCRIBE_NOW",
+      payment_method: {
+        payer_selected: "PAYPAL",
+        payee_preferred: "IMMEDIATE_PAYMENT_REQUIRED",
+      },
+      return_url: appUrl + "?paypal=success&product=" + productType,
+      cancel_url: appUrl + "?paypal=cancelled&product=" + productType,
+    },
+  };
+
+  if (productType === "core" && existing?.status === "trialing" && existing?.trial_ends_at) {
+    const trialEnd = new Date(existing.trial_ends_at);
+    if (trialEnd.getTime() > Date.now() + 60_000) payload.start_time = trialEnd.toISOString();
+  }
+
+  const created = await paypalRequest(base, token, "/v1/billing/subscriptions", "POST", payload);
+  const subscriptionId = String(created.id || "");
+  const approvalUrl = String((created.links || []).find((item: any) => item.rel === "approve")?.href || "");
+  if (!subscriptionId || !approvalUrl) throw new Error("PayPal no devolvió un enlace de aprobación.");
+
+  if (productType === "core") {
+    const trialActive = existing?.status === "trialing" && existing?.trial_ends_at
+      && new Date(existing.trial_ends_at).getTime() > Date.now();
+    const values = {
+      company_id: companyId,
+      plan_code: existing?.plan_code || planCode,
+      provider: "paypal",
+      provider_subscription_id: subscriptionId,
+      provider_approval_url: approvalUrl,
+      paypal_pending_plan_code: planCode,
+      status: trialActive ? "trialing" : "incomplete",
+      billing_interval: "month",
+      currency: plan.currency || "USD",
+      unit_amount_cents: Number(plan.monthly_price_cents),
+      updated_at: new Date().toISOString(),
+    };
+    const writeResult = existing?.id
+      ? await admin.from("subscriptions").update(values).eq("id", existing.id)
+      : await admin.from("subscriptions").insert(values);
+    if (writeResult.error) throw new Error("PayPal creó la suscripción, pero SHINKA no pudo guardar el intento. Contacta al soporte antes de volver a pagar.");
+  } else {
+    const writeResult = await admin.from("company_ai_subscriptions").upsert({
+      company_id: companyId,
+      addon_plan_code: planCode,
+      status: "incomplete",
+      provider: "paypal",
+      provider_subscription_id: subscriptionId,
+      provider_approval_url: approvalUrl,
+      current_period_start: null,
+      current_period_end: null,
+      cancel_at_period_end: false,
+      canceled_at: null,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: "company_id" });
+    if (writeResult.error) throw new Error("PayPal creó la suscripción, pero SHINKA no pudo guardar el intento.");
+  }
+
+  return response({
+    approval_url: approvalUrl,
+    subscription_id: subscriptionId,
+    product_type: productType,
+    plan_code: planCode,
+    message: "Abre PayPal para aprobar la suscripción. SHINKA activará el plan cuando PayPal confirme el pago.",
+  });
 });
