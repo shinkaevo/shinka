@@ -1002,7 +1002,7 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
           current && isActivePaid ? 'Plan actual' :
           isActivePaid ? 'Cambiar a ' + plan.display_name :
           'Elegir ' + plan.display_name;
-        const canResume = isPending && !!currentSub?.provider_approval_url;
+        const canResume = isPending && !!currentSub?.provider_approval_url && !sandboxBlocked;
         const canShowButton = canCheckout && configured && !isPending && !paypalAlreadyAuthorized && (!current || isTrial);
         const action = canResume
           ? '<button class="btn btn-primary btn-block" type="button" data-paypal-resume="' + escapeHTML(currentSub.provider_approval_url) + '">Continuar con PayPal</button>'
@@ -1666,7 +1666,7 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
         const isPending = subscription?.provider === 'paypal'
           && subscription?.addon_plan_code === p.plan_code
           && subscription?.status === 'incomplete';
-        const hasPendingUrl = isPending && !!subscription?.provider_approval_url;
+        const hasPendingUrl = isPending && !!subscription?.provider_approval_url && !sandboxBlocked;
         const action = hasPendingUrl
           ? '<button class="btn btn-primary btn-block" type="button" data-paypal-resume="' + escapeHTML(subscription.provider_approval_url) + '">Continuar con PayPal</button>'
           : isPending
