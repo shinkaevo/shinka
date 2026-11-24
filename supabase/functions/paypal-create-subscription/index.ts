@@ -66,29 +66,68 @@ Deno.serve(async req => {
 
     let existing: any = null;
     if (kind === "core") {
-      const { data } = await admin.from("subscriptions").select("id,plan_code,provider,status,trial_starts_at,trial_ends_at,current_period_end,provider_subscription_id,provider_approval_url")
+      const { data } = await admin.from("subscriptions").select("id,plan_code,provider,status,trial_starts_at,trial_ends_at,current_period_start,current_period_end,provider_subscription_id,provider_approval_url,paypal_pending_plan_code")
         .eq("company_id", companyId).order("created_at", { ascending: false }).limit(1);
       existing = data?.[0] || null;
-      if (existing?.status === "active" && (!existing.current_period_end || new Date(existing.current_period_end).getTime() > Date.now()))
-        return reply({ error: "Ya tienes una suscripción pagada activa. Para cambiar entre CORE, FLOW o NEXUS hay que gestionar la suscripción actual primero." }, 409, origin);
-      if (existing?.provider === "paypal" && existing?.provider_subscription_id)
-        return reply(existing.provider_approval_url
-          ? { approval_url: existing.provider_approval_url, subscription_id: existing.provider_subscription_id, reused: true }
-          : { error: "Ya existe una suscripción PayPal pendiente o activa para este espacio. No se creará otro cobro." }, 409, origin);
+      // A paid PayPal plan can be upgraded/downgraded in-place. The AI add-on
+      // remains an independent subscription and is never changed by this flow.
     } else {
       const { data } = await admin.from("company_ai_subscriptions").select("addon_plan_code,provider,status,current_period_end,provider_subscription_id,provider_approval_url")
         .eq("company_id", companyId).maybeSingle();
       existing = data;
       if (existing?.status === "active" && existing.current_period_end && new Date(existing.current_period_end).getTime() > Date.now())
-        return reply({ error: "SHINKA IA ya está activo. Cambiar CORE, FLOW o NEXUS no modifica sus créditos ni su suscripción." }, 409, origin);
-      if (existing?.provider === "paypal" && existing?.provider_subscription_id)
-        return reply(existing.provider_approval_url
-          ? { approval_url: existing.provider_approval_url, subscription_id: existing.provider_subscription_id, reused: true }
-          : { error: "Ya existe una suscripción PayPal pendiente para SHINKA IA. No se creará otro cobro." }, 409, origin);
+        return reply({ error: "SHINKA IA ya está activo. Cambiar CORE, FLOW o NEXUS no modifica sus créditos ni su suscripción; el complemento se administra por separado." }, 409, origin);
+      if (existing?.provider === "paypal" && existing?.provider_subscription_id) {
+        if (existing.provider_approval_url) {
+          return reply({ approval_url: existing.provider_approval_url, subscription_id: existing.provider_subscription_id, reused: true }, 200, origin);
+        }
+        return reply({ error: "Ya existe una suscripción PayPal pendiente para SHINKA IA. No se creará otro cobro." }, 409, origin);
+      }
     }
 
     const base = env === "live" ? "https://api-m.paypal.com" : "https://api-m.sandbox.paypal.com";
     const token = await tokenFor(base, clientId, clientSecret);
+
+    if (kind === "core" && existing?.provider === "paypal" && existing?.provider_subscription_id
+        && ["active", "trialing", "incomplete"].includes(existing.status)) {
+      if (existing.plan_code === planCode && !existing.paypal_pending_plan_code) {
+        if (existing.provider_approval_url) {
+          return reply({ approval_url: existing.provider_approval_url, subscription_id: existing.provider_subscription_id, reused: true }, 200, origin);
+        }
+        return reply({ error: "Este plan ya está vinculado a tu suscripción actual." }, 409, origin);
+      }
+      if (existing.paypal_pending_plan_code === planCode && existing.provider_approval_url) {
+        return reply({ approval_url: existing.provider_approval_url, subscription_id: existing.provider_subscription_id, reused: true }, 200, origin);
+      }
+      const reviseResponse = await fetch(base + "/v1/billing/subscriptions/" + encodeURIComponent(existing.provider_subscription_id) + "/revise", {
+        method: "POST",
+        headers: { Authorization: "Bearer " + token, "Content-Type": "application/json", Accept: "application/json", "PayPal-Request-Id": crypto.randomUUID() },
+        body: JSON.stringify({ plan_id: plan.paypal_plan_id }),
+        signal: AbortSignal.timeout(25000),
+      });
+      const reviseData = await reviseResponse.json().catch(() => ({}));
+      if (!reviseResponse.ok) throw new Error(reviseData.message || "PayPal no pudo preparar el cambio de plan.");
+      const approvalUrl = String((reviseData.links || []).find((x: any) => x?.rel === "approve")?.href || "");
+      if (!approvalUrl) throw new Error("PayPal no devolvió el enlace para confirmar el cambio de plan.");
+      const { error: reviseSaveError } = await admin.from("subscriptions").update({
+        paypal_pending_plan_code: planCode,
+        provider_approval_url: approvalUrl,
+        updated_at: new Date().toISOString(),
+      }).eq("id", existing.id);
+      if (reviseSaveError) throw new Error("PayPal preparó el cambio, pero SHINKA no pudo guardar la confirmación. No repitas el intento; contacta al soporte.");
+      return reply({ approval_url: approvalUrl, subscription_id: existing.provider_subscription_id, product_type: "core", plan_code: planCode, revised: true }, 200, origin);
+    }
+
+    if (kind === "core" && existing?.status === "active"
+        && (!existing.current_period_end || new Date(existing.current_period_end).getTime() > Date.now())
+        && existing.provider !== "paypal") {
+      return reply({ error: "Esta suscripción fue creada con otro método. No crearemos una segunda para evitar dobles cobros; el adulto administrador debe gestionar el cambio desde el proveedor actual." }, 409, origin);
+    }
+    if (kind === "core" && existing?.provider === "paypal" && existing?.provider_subscription_id
+        && ["past_due", "paused"].includes(existing.status)) {
+      return reply({ error: "La suscripción actual tiene un pago pendiente. Resuelve ese estado en PayPal antes de crear otro plan." }, 409, origin);
+    }
+
     const appUrl = "https://shinkaevo.github.io/shinka/";
     const payload: Record<string, unknown> = {
       plan_id: plan.paypal_plan_id,
@@ -117,8 +156,9 @@ Deno.serve(async req => {
     if (kind === "core") {
       const trialActive = existing?.status === "trialing" && existing?.trial_ends_at && new Date(existing.trial_ends_at).getTime() > Date.now();
       const values = {
-        company_id: companyId, plan_code: code, provider: "paypal", provider_subscription_id: subscriptionId,
-        provider_approval_url: approvalUrl, status: trialActive ? "trialing" : "incomplete", billing_interval: "month",
+        company_id: companyId, provider: "paypal", provider_subscription_id: subscriptionId,
+        provider_approval_url: approvalUrl, paypal_pending_plan_code: code,
+        status: trialActive ? "trialing" : "incomplete", billing_interval: "month",
         currency: plan.currency || "USD", unit_amount_cents: Number(plan.monthly_price_cents), updated_at: new Date().toISOString(),
       };
       const write = existing?.id
