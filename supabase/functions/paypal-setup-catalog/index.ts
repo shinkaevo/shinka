@@ -38,7 +38,8 @@ const amount = (cents: number) => (cents / 100).toFixed(2);
 
 Deno.serve(async req => {
   const origin = req.headers.get("Origin") || ORIGIN;
-  if (req.method === "OPTIONS") return reply({ ok: true }, 200, origin);
+  if (origin !== ORIGIN) return reply({ error: "Origen no permitido." }, 403, ORIGIN);
+  if (req.method === "OPTIONS") return reply({ ok: true }, 200, ORIGIN);
   if (req.method !== "POST") return reply({ error: "Método no permitido." }, 405, origin);
   try {
     const auth = req.headers.get("Authorization") || "";
