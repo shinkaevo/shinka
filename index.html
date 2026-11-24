@@ -891,6 +891,20 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
       return text;
     }
 
+    function resumePayPalApproval(approvalUrl, button) {
+      try {
+        const parsed = new URL(String(approvalUrl || ''));
+        if (parsed.protocol !== 'https:' || !/(^|\\.)paypal\\.com$/i.test(parsed.hostname)) {
+          throw new Error('El enlace de aprobación no pertenece a PayPal.');
+        }
+        if (button) { button.disabled = true; button.textContent = 'Abriendo PayPal…'; }
+        window.location.assign(parsed.toString());
+      } catch (error) {
+        showMessage('globalMessage', friendlyError(error), 'error');
+        if (button) button.disabled = false;
+      }
+    }
+
     async function startPayPalSubscription(productType, planCode, button) {
       if (!state.client || !state.company || !state.user) {
         showMessage('globalMessage', 'Inicia sesión antes de continuar con PayPal.', 'error');
@@ -935,7 +949,7 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
           .select('plan_code,display_name,description,monthly_price_cents,currency,paypal_plan_id,paypal_environment')
           .eq('is_active', true).order('display_order', { ascending: true }),
         state.client.from('subscriptions')
-          .select('id,plan_code,provider,status,trial_ends_at,current_period_end,provider_subscription_id,paypal_pending_plan_code')
+          .select('id,plan_code,provider,status,trial_ends_at,current_period_end,provider_subscription_id,provider_approval_url,paypal_pending_plan_code')
           .eq('company_id', state.company.id)
           .order('created_at', { ascending: false }).limit(1)
       ]);
@@ -974,12 +988,15 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
           current && isActivePaid ? 'Plan actual' :
           isActivePaid ? 'Cambiar a ' + plan.display_name :
           'Elegir ' + plan.display_name;
+        const canResume = isPending && !!currentSub?.provider_approval_url;
         const canShowButton = canCheckout && configured && !isPending && (!current || isTrial);
-        const action = canShowButton
-          ? '<button class="btn btn-primary btn-block" type="button" data-paypal-product="core" data-plan-code="' + escapeHTML(plan.plan_code) + '">' + escapeHTML(buttonLabel) + '</button>'
-          : '<span class="subscription-plan-note">' + (isPending ? 'Esperando tu aprobación de PayPal' :
-              current && (isTrial || isActivePaid) ? 'Plan actual' :
-              configured ? 'Gestiona el plan actual antes de cambiar' : 'Preparando pago seguro') + '</span>';
+        const action = canResume
+          ? '<button class="btn btn-primary btn-block" type="button" data-paypal-resume="' + escapeHTML(currentSub.provider_approval_url) + '">Continuar con PayPal</button>'
+          : canShowButton
+            ? '<button class="btn btn-primary btn-block" type="button" data-paypal-product="core" data-plan-code="' + escapeHTML(plan.plan_code) + '">' + escapeHTML(buttonLabel) + '</button>'
+            : '<span class="subscription-plan-note">' + (isPending ? 'Esperando confirmación segura de PayPal' :
+                current && (isTrial || isActivePaid) ? 'Plan actual' :
+                configured ? 'Gestiona el plan actual antes de cambiar' : 'Preparando pago seguro') + '</span>';
         return '<article class="subscription-plan-card' + (current ? ' is-current' : '') + '">' +
           '<div class="subscription-plan-title">' + escapeHTML(plan.display_name) + '</div>' +
           '<div class="subscription-plan-price">' + price + '<small> / mes</small></div>' +
@@ -1019,6 +1036,9 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
 
       document.querySelectorAll('[data-paypal-product="core"]').forEach(button => {
         button.addEventListener('click', () => startPayPalSubscription('core', button.dataset.planCode, button));
+      });
+      document.querySelectorAll('[data-paypal-resume]').forEach(button => {
+        button.addEventListener('click', () => resumePayPalApproval(button.dataset.paypalResume, button));
       });
       $('paypalSetupBtn')?.addEventListener('click', async () => {
         const button = $('paypalSetupBtn');
@@ -1583,7 +1603,7 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
 
       const [subscriptionRes, plansRes] = await Promise.all([
         state.client.from('company_ai_subscriptions')
-          .select('addon_plan_code,status,current_period_start,current_period_end,cancel_at_period_end')
+          .select('addon_plan_code,status,current_period_start,current_period_end,cancel_at_period_end,provider,provider_subscription_id,provider_approval_url')
           .eq('company_id', companyId).maybeSingle(),
         state.client.from('ai_addon_catalog')
           .select('plan_code,display_name,description,monthly_credits,monthly_price_cents,currency,paypal_plan_id,paypal_environment')
@@ -1623,9 +1643,19 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
           new Intl.NumberFormat('es-DO', { style: 'currency', currency: p.currency || 'USD' })
             .format(Number(p.monthly_price_cents) / 100) + ' / mes';
         const configured = !!p.paypal_plan_id && p.paypal_environment === 'sandbox';
-        const action = configured
-          ? '<button class="btn btn-primary btn-block" type="button" data-paypal-product="ai" data-plan-code="' + escapeHTML(p.plan_code) + '">Contratar ' + escapeHTML(p.display_name) + '</button>'
-          : '<span class="ai-plan-note">Pago Sandbox en preparación</span>';
+        const isPending = subscription?.provider === 'paypal'
+          && subscription?.addon_plan_code === p.plan_code
+          && subscription?.status === 'incomplete';
+        const hasPendingUrl = isPending && !!subscription?.provider_approval_url;
+        const action = hasPendingUrl
+          ? '<button class="btn btn-primary btn-block" type="button" data-paypal-resume="' + escapeHTML(subscription.provider_approval_url) + '">Continuar con PayPal</button>'
+          : isPending
+            ? '<span class="ai-plan-note">Esperando confirmación de PayPal</span>'
+            : subscription?.provider === 'paypal' && subscription?.status === 'incomplete'
+              ? '<span class="ai-plan-note">Termina el pago pendiente antes de elegir otro paquete.</span>'
+              : configured
+                ? '<button class="btn btn-primary btn-block" type="button" data-paypal-product="ai" data-plan-code="' + escapeHTML(p.plan_code) + '">Contratar ' + escapeHTML(p.display_name) + '</button>'
+                : '<span class="ai-plan-note">Pago Sandbox en preparación</span>';
         return '<article class="ai-plan-card">' +
           '<div class="ai-plan-name">' + escapeHTML(p.display_name) + '</div>' +
           '<div class="ai-plan-credits">' + Number(p.monthly_credits).toLocaleString('es-DO') + ' <small>créditos / mes</small></div>' +
@@ -1652,6 +1682,9 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
           '</section>';
         document.querySelectorAll('[data-paypal-product="ai"]').forEach(button => {
           button.addEventListener('click', () => startPayPalSubscription('ai', button.dataset.planCode, button));
+        });
+        document.querySelectorAll('[data-paypal-resume]').forEach(button => {
+          button.addEventListener('click', () => resumePayPalApproval(button.dataset.paypalResume, button));
         });
         return;
       }
