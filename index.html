@@ -1044,6 +1044,9 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
               ? '<div class="subscription-trial-meta"><strong>' + escapeHTML(status.plan_name || status.plan_code || 'Activo') + '</strong><span>Suscripción activa</span></div>'
               : '<div class="subscription-trial-meta"><strong>Datos protegidos</strong><span>Tu información se conserva aunque el acceso esté pausado.</span></div>') +
         '</section>' +
+        (state.role === 'owner'
+          ? '<section class="section" style="margin-top:16px"><div class="toolbar"><div><h2>Activar con serial</h2><p>Introduce un código SHINKA para activar CORE, FLOW o NEXUS en esta empresa.</p></div></div><form id="serialRedeemForm" style="margin-top:14px"><div class="field"><label for="serialRedeemCode">Código de activación</label><input id="serialRedeemCode" name="serial_code" type="text" maxlength="60" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="SHK-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX" required></div><button class="btn btn-primary" type="submit">Activar serial</button></form><div id="serialRedeemMessage" class="message" role="status" aria-live="polite"></div></section>'
+          : '<section class="section" style="margin-top:16px"><h2>Activar con serial</h2><p>Solo el propietario de la empresa puede activar un serial. Pídele al propietario que lo introduzca desde Plan y facturación.</p></section>') +
         '<section class="section subscription-plans-section">' +
           '<div class="toolbar"><div><h2>Planes disponibles</h2><p>Elige el nivel que corresponda al uso de tu empresa.</p></div></div>' +
           '<div class="subscription-plans-grid">' + (cards || '<div class="empty-state">No hay planes disponibles.</div>') + '</div>' +
@@ -1052,6 +1055,33 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
             ? '<section class="section" style="margin-top:14px"><div class="toolbar"><div><h2>Configuración del desarrollador</h2><p>Prepara los productos, planes y webhook de PayPal en Sandbox.</p></div><button class="btn btn-secondary" id="paypalSetupBtn" type="button">' + (paypalReady ? 'Actualizar catálogo Sandbox' : 'Configurar PayPal Sandbox') + '</button></div><div id="paypalSetupStatus" class="message" role="status" aria-live="polite"></div></section>'
             : '') +
         '</section>';
+
+      $('serialRedeemForm')?.addEventListener('submit', async event => {
+        event.preventDefault();
+        const form = event.currentTarget;
+        const button = form.querySelector('button[type="submit"]');
+        const code = String(new FormData(form).get('serial_code') || '').trim();
+        button.disabled = true;
+        button.textContent = 'Validando…';
+        clearMessage('serialRedeemMessage');
+        try {
+          const result = await callShinkaSerialApi({
+            action: 'redeem',
+            company_id: state.company.id,
+            serial_code: code
+          });
+          await refreshCompanyPlan();
+          const access = await refreshSubscriptionAccess();
+          if (!access?.has_access) throw new Error('El serial se procesó, pero el acceso aún no se ha actualizado. Actualiza la página o contacta soporte.');
+          form.reset();
+          await navigate('dashboard');
+          showMessage('globalMessage', 'Serial activado: ' + String(result.plan_name || result.plan_code || 'plan').toUpperCase() + (result.lifetime ? ' · acceso de por vida.' : result.expires_at ? ' · vence ' + new Date(result.expires_at).toLocaleDateString('es-DO') + '.' : '.'), 'success');
+        } catch (error) {
+          showMessage('serialRedeemMessage', friendlyError(error), 'error');
+          button.disabled = false;
+          button.textContent = 'Activar serial';
+        }
+      });
 
       document.querySelectorAll('[data-paypal-product="core"]').forEach(button => {
         button.addEventListener('click', () => startPayPalSubscription('core', button.dataset.planCode, button));
@@ -1083,7 +1113,23 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
       });
     }
 
-        async function renderDeveloper() {
+        async function callShinkaSerialApi(payload) {
+      const { data, error } = await state.client.functions.invoke('shinka-serials', { body: payload });
+      if (error) {
+        let message = error.message || 'No pudimos procesar el serial.';
+        if (error.context && typeof error.context.json === 'function') {
+          try {
+            const detail = await error.context.json();
+            if (detail?.error) message = detail.error;
+          } catch {}
+        }
+        throw new Error(message);
+      }
+      if (data?.error) throw new Error(data.error);
+      return data || {};
+    }
+
+    async function renderDeveloper() {
       if (!state.isPlatformDeveloper) throw new Error('No tienes acceso a Developer Mode.');
       const [plansRes, entitlementsRes, simulationRes] = await Promise.all([
         state.client.from('plan_catalog')
@@ -1099,6 +1145,9 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
       if (plansRes.error) throw plansRes.error;
       if (entitlementsRes.error) throw entitlementsRes.error;
       if (simulationRes.error) throw simulationRes.error;
+
+      const serialsResponse = await callShinkaSerialApi({ action: 'list' });
+      const serials = Array.isArray(serialsResponse.items) ? serialsResponse.items : [];
 
       const plans = plansRes.data || [];
       const entitlements = entitlementsRes.data || [];
@@ -1152,6 +1201,109 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
         '</div>' +
         '<section class="section"><h2>Importante</h2><p>La simulación dura 12 horas y no genera cobros. Los límites de clientes, prospectos, servicios y pedidos se aplican al crear registros. La suscripción y la facturación real siguen siendo independientes.</p>' +
         '<div id="developerMessage" class="message" role="status" aria-live="polite"></div></section>';
+
+      const serialDurationLabel = value => value === '30_days' ? '30 días' : value === '365_days' ? '1 año' : 'De por vida';
+      const serialStatusLabel = value => value === 'available' ? 'Disponible' : value === 'redeemed' ? 'Canjeado' : 'Revocado';
+      const renderSerialRows = items => {
+        if (!items.length) return '<div class="empty-state">Todavía no has generado seriales.</div>';
+        return '<div class="table-wrap"><table><thead><tr><th>Serial</th><th>Plan</th><th>Duración</th><th>Estado</th><th>Creado</th><th>Acción</th></tr></thead><tbody>' +
+          items.map(item => '<tr><td><strong>SHK-••••-••••-••••-' + escapeHTML(item.code_suffix || '----') + '</strong></td>' +
+            '<td>' + escapeHTML(item.plan_name || String(item.plan_code || '').toUpperCase()) + '</td>' +
+            '<td>' + escapeHTML(serialDurationLabel(item.duration_type)) + '</td>' +
+            '<td><span class="badge-status" data-s="' + (item.status === 'redeemed' ? 'completed' : item.status === 'revoked' ? 'cancelled' : 'pending') + '">' + escapeHTML(serialStatusLabel(item.status)) + '</span></td>' +
+            '<td>' + escapeHTML(item.created_at ? new Date(item.created_at).toLocaleDateString('es-DO') : '—') + '</td>' +
+            '<td>' + (item.status !== 'revoked'
+              ? '<button class="btn btn-secondary small-btn" type="button" data-serial-revoke="' + escapeHTML(item.id) + '">' + (item.status === 'redeemed' ? 'Revocar acceso' : 'Revocar') + '</button>'
+              : '<span class="muted">—</span>') + '</td></tr>').join('') +
+          '</tbody></table></div>';
+      };
+
+      $('pageContent').innerHTML +=
+        '<section class="section" style="margin-top:18px"><div class="toolbar"><div><h2>Seriales de acceso</h2><p>Genera códigos de un solo uso para CORE, FLOW o NEXUS. El código completo solo se muestra al crearlo.</p></div><span class="badge-status" data-s="completed">Gestión privada</span></div>' +
+        '<form id="serialGenerateForm" class="form-grid" style="margin-top:16px;align-items:end">' +
+          '<div class="field"><label for="serialPlan">Plan</label><select id="serialPlan" name="plan_code" required>' +
+            plans.map(plan => '<option value="' + escapeHTML(plan.plan_code) + '">' + escapeHTML(plan.display_name) + '</option>').join('') +
+          '</select></div>' +
+          '<div class="field"><label for="serialDuration">Duración</label><select id="serialDuration" name="duration_type" required><option value="30_days">30 días</option><option value="365_days">1 año</option><option value="lifetime">De por vida</option></select></div>' +
+          '<div class="field"><label for="serialCount">Cantidad</label><input id="serialCount" name="count" type="number" min="1" max="25" value="1" required></div>' +
+          '<button class="btn btn-primary" type="submit">Generar seriales</button>' +
+        '</form>' +
+        '<div id="serialGenerated" class="message" role="status" aria-live="polite" style="margin-top:12px;display:none"><strong>Guarda estos códigos ahora. No volverán a mostrarse.</strong><textarea id="serialCodesOutput" rows="4" readonly style="width:100%;margin-top:8px"></textarea><button id="copySerialCodes" class="btn btn-secondary small-btn" type="button" style="margin-top:8px">Copiar códigos</button></div>' +
+        '<div id="serialAdminMessage" class="message" role="status" aria-live="polite"></div></section>' +
+        '<section class="section" style="margin-top:16px"><div class="toolbar"><div><h2>Seriales generados</h2><p>El historial muestra solo los últimos cuatro caracteres; nunca revela el código completo.</p></div></div><div id="serialList">' + renderSerialRows(serials) + '</div></section>';
+
+      async function refreshSerialList() {
+        const result = await callShinkaSerialApi({ action: 'list' });
+        $('serialList').innerHTML = renderSerialRows(Array.isArray(result.items) ? result.items : []);
+        bindSerialRevoke();
+      }
+      function bindSerialRevoke() {
+        document.querySelectorAll('[data-serial-revoke]').forEach(button => {
+          button.addEventListener('click', async () => {
+            const id = button.dataset.serialRevoke;
+            const confirmed = await uiConfirm(
+              '¿Revocar este serial?',
+              'Si ya fue canjeado, la empresa perderá el acceso de ese serial inmediatamente. Sus datos no se borrarán.',
+              'Revocar serial'
+            );
+            if (!confirmed) return;
+            button.disabled = true;
+            button.textContent = 'Revocando…';
+            try {
+              await callShinkaSerialApi({ action: 'revoke', serial_id: id });
+              await refreshSerialList();
+              showMessage('serialAdminMessage', 'Serial revocado. Los datos de la empresa se conservaron.', 'success');
+            } catch (error) {
+              showMessage('serialAdminMessage', friendlyError(error), 'error');
+              button.disabled = false;
+              button.textContent = 'Reintentar';
+            }
+          });
+        });
+      }
+      bindSerialRevoke();
+
+      $('serialGenerateForm')?.addEventListener('submit', async event => {
+        event.preventDefault();
+        const form = event.currentTarget;
+        const button = form.querySelector('button[type="submit"]');
+        const values = new FormData(form);
+        button.disabled = true;
+        button.textContent = 'Generando…';
+        try {
+          const result = await callShinkaSerialApi({
+            action: 'generate',
+            plan_code: String(values.get('plan_code') || ''),
+            duration_type: String(values.get('duration_type') || ''),
+            count: Number(values.get('count') || 1)
+          });
+          const issued = Array.isArray(result.serials) ? result.serials : [];
+          if (!issued.length) throw new Error('No se generaron seriales.');
+          $('serialCodesOutput').value = issued.map(item => item.code).join('\n');
+          const output = $('serialGenerated');
+          output.style.display = 'block';
+          output.className = 'message show success';
+          await refreshSerialList();
+          showMessage('serialAdminMessage', 'Se generaron ' + issued.length + ' serial(es). Copia y guarda los códigos ahora.', 'success');
+        } catch (error) {
+          showMessage('serialAdminMessage', friendlyError(error), 'error');
+        } finally {
+          button.disabled = false;
+          button.textContent = 'Generar seriales';
+        }
+      });
+      $('copySerialCodes')?.addEventListener('click', async () => {
+        const value = $('serialCodesOutput')?.value || '';
+        if (!value) return;
+        try {
+          await navigator.clipboard.writeText(value);
+          showMessage('serialAdminMessage', 'Códigos copiados.', 'success');
+        } catch {
+          $('serialCodesOutput').focus();
+          $('serialCodesOutput').select();
+          showMessage('serialAdminMessage', 'Selecciona el texto y cópialo manualmente.', 'info');
+        }
+      });
 
       document.querySelectorAll('[data-developer-plan]').forEach(button => {
         button.addEventListener('click', async () => {
