@@ -63,8 +63,13 @@ Deno.serve(async req => {
     const { data: cfg } = await admin.from("billing_provider_config").select("environment,webhook_id,product_ids").eq("provider", "paypal").maybeSingle();
     const products: Record<string,string> = {};
     const names: Record<string,string> = { core: "SHINKA · Plataforma de gestión", ai: "SHINKA IA · Complemento" };
+    const listed = await api(base, token, "/v1/catalogs/products?page_size=20&page=1");
+    const listedProducts = Array.isArray(listed.products) ? listed.products : [];
     for (const kind of ["core", "ai"]) {
       let id = cfg?.environment === env ? String(cfg.product_ids?.[kind] || "") : "";
+      if (!id) {
+        id = String(listedProducts.find((p: any) => p?.name === names[kind])?.id || "");
+      }
       if (!id) {
         const created = await api(base, token, "/v1/catalogs/products", "POST", {
           name: names[kind],
@@ -107,6 +112,13 @@ Deno.serve(async req => {
 
     const webhookUrl = url.replace(/\/+$/, "") + "/functions/v1/paypal-webhook";
     let webhookId = cfg?.environment === env ? String(cfg.webhook_id || "") : "";
+    if (!webhookId) {
+      const existingHooks = await api(base, token, "/v1/notifications/webhooks?page_size=20&page=1");
+      const match = Array.isArray(existingHooks.webhooks)
+        ? existingHooks.webhooks.find((hook: any) => hook?.url === webhookUrl)
+        : null;
+      webhookId = String(match?.id || "");
+    }
     if (!webhookId) {
       const hook = await api(base, token, "/v1/notifications/webhooks", "POST", {
         url: webhookUrl,
