@@ -965,6 +965,10 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
         : '—';
       const isActivePaid = status?.status === 'active' && status?.has_access;
       const isPaypalSubscription = currentSub?.provider === 'paypal' && !!currentSub?.provider_subscription_id;
+      const paypalAlreadyAuthorized = isPaypalSubscription
+        && ['active', 'trialing'].includes(currentSub?.status)
+        && currentSub?.plan_code === status?.plan_code
+        && !currentSub?.provider_approval_url;
       const canCheckout = !isActivePaid || isPaypalSubscription;
       const paypalReady = plans.some(p => p.paypal_plan_id && p.paypal_environment === 'sandbox');
       const heroTitle = isTrial ? 'Tu prueba gratuita está activa.' :
@@ -981,18 +985,20 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
           style: 'currency', currency: plan.currency || 'USD'
         }).format(Number(plan.monthly_price_cents || 0) / 100);
         const current = plan.plan_code === status?.plan_code;
-        const isPending = currentSub?.paypal_pending_plan_code === plan.plan_code;
+        const isPending = currentSub?.paypal_pending_plan_code === plan.plan_code && !paypalAlreadyAuthorized;
         const configured = !!plan.paypal_plan_id && plan.paypal_environment === 'sandbox';
-        const buttonLabel = isPending ? 'Cambio pendiente en PayPal' :
+        const buttonLabel = paypalAlreadyAuthorized ? 'Suscripción autorizada' : isPending ? 'Cambio pendiente en PayPal' :
           current && isTrial ? 'Continuar con CORE en PayPal' :
           current && isActivePaid ? 'Plan actual' :
           isActivePaid ? 'Cambiar a ' + plan.display_name :
           'Elegir ' + plan.display_name;
         const canResume = isPending && !!currentSub?.provider_approval_url;
-        const canShowButton = canCheckout && configured && !isPending && (!current || isTrial);
+        const canShowButton = canCheckout && configured && !isPending && !paypalAlreadyAuthorized && (!current || isTrial);
         const action = canResume
           ? '<button class="btn btn-primary btn-block" type="button" data-paypal-resume="' + escapeHTML(currentSub.provider_approval_url) + '">Continuar con PayPal</button>'
-          : canShowButton
+          : paypalAlreadyAuthorized
+            ? '<span class="subscription-plan-note">' + (isTrial ? 'Suscripción autorizada en PayPal · primer cobro al terminar la prueba' : 'Suscripción activa en PayPal') + '</span>'
+            : canShowButton
             ? '<button class="btn btn-primary btn-block" type="button" data-paypal-product="core" data-plan-code="' + escapeHTML(plan.plan_code) + '">' + escapeHTML(buttonLabel) + '</button>'
             : '<span class="subscription-plan-note">' + (isPending ? 'Esperando confirmación segura de PayPal' :
                 current && (isTrial || isActivePaid) ? 'Plan actual' :
@@ -1007,7 +1013,9 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
       const query = new URLSearchParams(window.location.search);
       const paypalResult = query.get('paypal');
       const paymentMessage = paypalResult === 'success'
-        ? '<div class="message show info">PayPal recibió tu aprobación. SHINKA activará el plan cuando confirme el pago mediante su notificación segura. No repitas el pago.</div>'
+        ? '<div class="message show info">' + (isTrial
+            ? 'PayPal confirmó tu suscripción. Tu prueba gratuita sigue activa y el primer cobro comenzará al terminarla. No repitas el pago.'
+            : 'PayPal recibió tu aprobación. SHINKA está verificando el estado de la suscripción. No repitas el pago.') + '</div>'
         : paypalResult === 'cancelled'
           ? '<div class="message show info">No se completó el proceso de PayPal. No se activó ningún plan.</div>'
           : '';
