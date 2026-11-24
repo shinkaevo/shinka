@@ -970,7 +970,16 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
         && currentSub?.plan_code === status?.plan_code
         && !currentSub?.provider_approval_url;
       const canCheckout = !isActivePaid || isPaypalSubscription;
-      const paypalReady = plans.some(p => p.paypal_plan_id && p.paypal_environment === 'sandbox');
+      const hasSandboxPlans = plans.some(p => p.paypal_plan_id && p.paypal_environment === 'sandbox');
+      const hasLivePlans = plans.some(p => p.paypal_plan_id && p.paypal_environment === 'live');
+      const paypalReady = plans.some(p => p.paypal_plan_id && (p.paypal_environment === 'live' || (state.isPlatformDeveloper && p.paypal_environment === 'sandbox')));
+      const paymentNotice = hasLivePlans
+        ? '<div class="subscription-payment-note"><strong>Pagos seguros con PayPal</strong><span>Las suscripciones se activan y renuevan después de verificar las notificaciones oficiales de PayPal. SHINKA IA se contrata y factura por separado.</span></div>'
+        : state.isPlatformDeveloper && hasSandboxPlans
+          ? '<div class="subscription-payment-note"><strong>Entorno de pruebas · PayPal Sandbox</strong><span>Solo la cuenta desarrolladora puede realizar compras ficticias. No se cobrarán fondos reales. Antes de abrir las ventas, activa y verifica PayPal en producción.</span></div>'
+          : hasSandboxPlans
+            ? '<div class="subscription-payment-note"><strong>Facturación en preparación</strong><span>Tu prueba gratuita de 14 días sigue disponible. Los pagos reales se habilitarán cuando SHINKA active y verifique PayPal en producción.</span></div>'
+            : '<div class="subscription-payment-note"><strong>Facturación en preparación</strong><span>Tu prueba gratuita sigue disponible. La contratación se habilitará cuando el sistema de pagos esté listo.</span></div>';
       const heroTitle = isTrial ? 'Tu prueba gratuita está activa.' :
         status?.has_access ? 'Tu suscripción está activa.' :
         'Tu período de prueba terminó.';
@@ -986,7 +995,8 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
         }).format(Number(plan.monthly_price_cents || 0) / 100);
         const current = plan.plan_code === status?.plan_code;
         const isPending = currentSub?.paypal_pending_plan_code === plan.plan_code && !paypalAlreadyAuthorized;
-        const configured = !!plan.paypal_plan_id && plan.paypal_environment === 'sandbox';
+        const configured = !!plan.paypal_plan_id && (plan.paypal_environment === 'live' || (state.isPlatformDeveloper && plan.paypal_environment === 'sandbox'));
+        const sandboxBlocked = plan.paypal_environment === 'sandbox' && !state.isPlatformDeveloper;
         const buttonLabel = paypalAlreadyAuthorized ? 'Suscripción autorizada' : isPending ? 'Cambio pendiente en PayPal' :
           current && isTrial ? 'Continuar con CORE en PayPal' :
           current && isActivePaid ? 'Plan actual' :
@@ -1002,6 +1012,7 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
             ? '<button class="btn btn-primary btn-block" type="button" data-paypal-product="core" data-plan-code="' + escapeHTML(plan.plan_code) + '">' + escapeHTML(buttonLabel) + '</button>'
             : '<span class="subscription-plan-note">' + (isPending ? 'Esperando confirmación segura de PayPal' :
                 current && (isTrial || isActivePaid) ? 'Plan actual' :
+                sandboxBlocked ? 'Los pagos reales estarán disponibles al activar PayPal en producción' :
                 configured ? 'Gestiona el plan actual antes de cambiar' : 'Preparando pago seguro') + '</span>';
         return '<article class="subscription-plan-card' + (current ? ' is-current' : '') + '">' +
           '<div class="subscription-plan-title">' + escapeHTML(plan.display_name) + '</div>' +
@@ -1036,7 +1047,7 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
         '<section class="section subscription-plans-section">' +
           '<div class="toolbar"><div><h2>Planes disponibles</h2><p>Elige el nivel que corresponda al uso de tu empresa.</p></div></div>' +
           '<div class="subscription-plans-grid">' + (cards || '<div class="empty-state">No hay planes disponibles.</div>') + '</div>' +
-          '<div class="subscription-payment-note"><strong>Pagos de prueba · Sandbox</strong><span>Los botones abren el entorno de prueba de PayPal. No se cobrarán fondos reales. El plan se activa únicamente cuando PayPal confirma el evento de pago. SHINKA IA se contrata y factura por separado.</span></div>' +
+          paymentNotice +
           (state.isPlatformDeveloper
             ? '<section class="section" style="margin-top:14px"><div class="toolbar"><div><h2>Configuración del desarrollador</h2><p>Prepara los productos, planes y webhook de PayPal en Sandbox.</p></div><button class="btn btn-secondary" id="paypalSetupBtn" type="button">' + (paypalReady ? 'Actualizar catálogo Sandbox' : 'Configurar PayPal Sandbox') + '</button></div><div id="paypalSetupStatus" class="message" role="status" aria-live="polite"></div></section>'
             : '') +
@@ -1650,7 +1661,8 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
         const price = p.monthly_price_cents === null ? 'Precio por definir' :
           new Intl.NumberFormat('es-DO', { style: 'currency', currency: p.currency || 'USD' })
             .format(Number(p.monthly_price_cents) / 100) + ' / mes';
-        const configured = !!p.paypal_plan_id && p.paypal_environment === 'sandbox';
+        const configured = !!p.paypal_plan_id && (p.paypal_environment === 'live' || (state.isPlatformDeveloper && p.paypal_environment === 'sandbox'));
+        const sandboxBlocked = p.paypal_environment === 'sandbox' && !state.isPlatformDeveloper;
         const isPending = subscription?.provider === 'paypal'
           && subscription?.addon_plan_code === p.plan_code
           && subscription?.status === 'incomplete';
@@ -1663,7 +1675,7 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
               ? '<span class="ai-plan-note">Termina el pago pendiente antes de elegir otro paquete.</span>'
               : configured
                 ? '<button class="btn btn-primary btn-block" type="button" data-paypal-product="ai" data-plan-code="' + escapeHTML(p.plan_code) + '">Contratar ' + escapeHTML(p.display_name) + '</button>'
-                : '<span class="ai-plan-note">Pago Sandbox en preparación</span>';
+                : '<span class="ai-plan-note">' + (sandboxBlocked ? 'Contratación disponible cuando PayPal esté en producción.' : 'Pago en preparación') + '</span>';
         return '<article class="ai-plan-card">' +
           '<div class="ai-plan-name">' + escapeHTML(p.display_name) + '</div>' +
           '<div class="ai-plan-credits">' + Number(p.monthly_credits).toLocaleString('es-DO') + ' <small>créditos / mes</small></div>' +
