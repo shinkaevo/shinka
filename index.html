@@ -891,42 +891,113 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
       return text;
     }
 
+    async function startPayPalSubscription(productType, planCode, button) {
+      if (!state.client || !state.company || !state.user) {
+        showMessage('globalMessage', 'Inicia sesión antes de continuar con PayPal.', 'error');
+        return;
+      }
+      if (state.role !== 'owner') {
+        showMessage('globalMessage', 'Solo el propietario del espacio puede contratar o cambiar la facturación.', 'error');
+        return;
+      }
+      const original = button?.textContent || 'Continuar con PayPal';
+      if (button) { button.disabled = true; button.textContent = 'Conectando con PayPal…'; }
+      try {
+        const { data, error } = await state.client.functions.invoke('paypal-create-subscription', {
+          body: {
+            company_id: state.company.id,
+            product_type: productType,
+            plan_code: planCode
+          }
+        });
+        if (error) {
+          let message = error.message || 'No pudimos iniciar PayPal.';
+          if (error.context && typeof error.context.json === 'function') {
+            try { const detail = await error.context.json(); if (detail?.error) message = detail.error; } catch {}
+          }
+          throw new Error(message);
+        }
+        if (data?.error) throw new Error(data.error);
+        if (!data?.approval_url || !/^https:\/\//i.test(data.approval_url)) {
+          throw new Error('PayPal no devolvió un enlace de aprobación seguro.');
+        }
+        window.location.assign(data.approval_url);
+      } catch (error) {
+        showMessage('globalMessage', friendlyError(error), 'error');
+        if (button) { button.disabled = false; button.textContent = original; }
+      }
+    }
+
     async function renderBilling() {
       const status = await refreshSubscriptionAccess();
-      const { data: plans, error } = await state.client.from('plan_catalog')
-        .select('plan_code,display_name,description,monthly_price_cents,currency')
-        .eq('is_active', true).order('display_order', { ascending: true });
-      if (error) throw error;
+      const [plansRes, subscriptionRes] = await Promise.all([
+        state.client.from('plan_catalog')
+          .select('plan_code,display_name,description,monthly_price_cents,currency,paypal_plan_id,paypal_environment')
+          .eq('is_active', true).order('display_order', { ascending: true }),
+        state.client.from('subscriptions')
+          .select('id,plan_code,provider,status,trial_ends_at,current_period_end,provider_subscription_id,paypal_pending_plan_code')
+          .eq('company_id', state.company.id)
+          .order('created_at', { ascending: false }).limit(1)
+      ]);
+      if (plansRes.error) throw plansRes.error;
+      if (subscriptionRes.error) throw subscriptionRes.error;
 
+      const plans = plansRes.data || [];
+      const currentSub = subscriptionRes.data?.[0] || null;
       const isTrial = status?.status === 'trialing' && status?.has_access;
-      const isExpired = status?.status === 'expired' || status?.has_access === false;
       const endDate = status?.trial_ends_at ? new Date(status.trial_ends_at) : null;
       const dateLabel = endDate && !Number.isNaN(endDate.getTime())
         ? endDate.toLocaleString('es-DO', { dateStyle: 'long', timeStyle: 'short' })
         : '—';
+      const isActivePaid = status?.status === 'active' && status?.has_access;
+      const isPaypalSubscription = currentSub?.provider === 'paypal' && !!currentSub?.provider_subscription_id;
+      const canCheckout = !isActivePaid || isPaypalSubscription;
+      const paypalReady = plans.some(p => p.paypal_plan_id && p.paypal_environment === 'sandbox');
       const heroTitle = isTrial ? 'Tu prueba gratuita está activa.' :
         status?.has_access ? 'Tu suscripción está activa.' :
         'Tu período de prueba terminó.';
       const heroText = isTrial
-        ? 'Tienes 14 días para probar SHINKA CORE. No se realizará ningún cobro durante la prueba.'
+        ? 'Tienes 14 días para probar SHINKA. Puedes autorizar ahora tu plan y el primer cobro comenzará al terminar la prueba.'
         : status?.has_access
-          ? 'Tu espacio de trabajo tiene acceso activo. Tus datos y procesos permanecen asociados a esta empresa.'
-          : 'Para volver a utilizar clientes, pedidos, servicios, finanzas y SHINKA IA, será necesario activar un plan. Tus registros siguen guardados; no se borran ni se reinician al terminar la prueba.';
+          ? 'Tu espacio de trabajo tiene acceso activo. Los cambios de CORE, FLOW o NEXUS no modifican tu complemento independiente de SHINKA IA.'
+          : 'Para volver a utilizar clientes, pedidos, servicios y finanzas, activa un plan. Tus datos y procesos se conservan aunque el acceso se pause.';
 
-      const cards = (plans || []).map(plan => {
+      const cards = plans.map(plan => {
         const price = new Intl.NumberFormat('es-DO', {
           style: 'currency', currency: plan.currency || 'USD'
         }).format(Number(plan.monthly_price_cents || 0) / 100);
         const current = plan.plan_code === status?.plan_code;
+        const isPending = currentSub?.paypal_pending_plan_code === plan.plan_code;
+        const configured = !!plan.paypal_plan_id && plan.paypal_environment === 'sandbox';
+        const buttonLabel = isPending ? 'Cambio pendiente en PayPal' :
+          current && isTrial ? 'Continuar con CORE en PayPal' :
+          current && isActivePaid ? 'Plan actual' :
+          isActivePaid ? 'Cambiar a ' + plan.display_name :
+          'Elegir ' + plan.display_name;
+        const canShowButton = canCheckout && configured && !isPending && (!current || isTrial);
+        const action = canShowButton
+          ? '<button class="btn btn-primary btn-block" type="button" data-paypal-product="core" data-plan-code="' + escapeHTML(plan.plan_code) + '">' + escapeHTML(buttonLabel) + '</button>'
+          : '<span class="subscription-plan-note">' + (isPending ? 'Esperando tu aprobación de PayPal' :
+              current && (isTrial || isActivePaid) ? 'Plan actual' :
+              configured ? 'Gestiona el plan actual antes de cambiar' : 'Preparando pago seguro') + '</span>';
         return '<article class="subscription-plan-card' + (current ? ' is-current' : '') + '">' +
           '<div class="subscription-plan-title">' + escapeHTML(plan.display_name) + '</div>' +
           '<div class="subscription-plan-price">' + price + '<small> / mes</small></div>' +
-          '<p>' + escapeHTML(plan.description || '') + '</p>' +
-          '<span class="subscription-plan-note">' + (current && isTrial ? 'Plan incluido en tu prueba' : current && status?.has_access ? 'Plan actual' : 'Disponible al activar tu suscripción') + '</span>' +
+          '<p>' + escapeHTML(plan.description || '') + '</p>' + action +
         '</article>';
       }).join('');
 
+      const query = new URLSearchParams(window.location.search);
+      const paypalResult = query.get('paypal');
+      const paymentMessage = paypalResult === 'success'
+        ? '<div class="message show info">PayPal recibió tu aprobación. SHINKA activará el plan cuando confirme el pago mediante su notificación segura. No repitas el pago.</div>'
+        : paypalResult === 'cancelled'
+          ? '<div class="message show info">No se completó el proceso de PayPal. No se activó ningún plan.</div>'
+          : '';
+      if (paypalResult) window.history.replaceState({}, document.title, window.location.pathname + window.location.hash);
+
       $('pageContent').innerHTML =
+        paymentMessage +
         '<section class="subscription-hero">' +
           '<span class="subscription-eyebrow">SHINKA · ZUREY DIGITAL</span>' +
           '<h2>' + heroTitle + '</h2>' +
@@ -940,11 +1011,40 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
         '<section class="section subscription-plans-section">' +
           '<div class="toolbar"><div><h2>Planes disponibles</h2><p>Elige el nivel que corresponda al uso de tu empresa.</p></div></div>' +
           '<div class="subscription-plans-grid">' + (cards || '<div class="empty-state">No hay planes disponibles.</div>') + '</div>' +
-          '<div class="subscription-payment-note"><strong>Pagos en preparación</strong><span>La activación de pagos en línea todavía no está conectada. No introduzcas datos de tarjeta ni envíes dinero desde esta pantalla. Cuando se habilite el proveedor de pagos, la confirmación será automática y segura.</span></div>' +
+          '<div class="subscription-payment-note"><strong>Pagos de prueba · Sandbox</strong><span>Los botones abren el entorno de prueba de PayPal. No se cobrarán fondos reales. El plan se activa únicamente cuando PayPal confirma el evento de pago. SHINKA IA se contrata y factura por separado.</span></div>' +
+          (state.isPlatformDeveloper
+            ? '<section class="section" style="margin-top:14px"><div class="toolbar"><div><h2>Configuración del desarrollador</h2><p>Prepara los productos, planes y webhook de PayPal en Sandbox.</p></div><button class="btn btn-secondary" id="paypalSetupBtn" type="button">' + (paypalReady ? 'Actualizar catálogo Sandbox' : 'Configurar PayPal Sandbox') + '</button></div><div id="paypalSetupStatus" class="message" role="status" aria-live="polite"></div></section>'
+            : '') +
         '</section>';
+
+      document.querySelectorAll('[data-paypal-product="core"]').forEach(button => {
+        button.addEventListener('click', () => startPayPalSubscription('core', button.dataset.planCode, button));
+      });
+      $('paypalSetupBtn')?.addEventListener('click', async () => {
+        const button = $('paypalSetupBtn');
+        button.disabled = true;
+        button.textContent = 'Preparando catálogo…';
+        try {
+          const { data, error } = await state.client.functions.invoke('paypal-setup-catalog', { body: {} });
+          if (error) {
+            let message = error.message || 'No pudimos configurar PayPal.';
+            if (error.context && typeof error.context.json === 'function') {
+              try { const detail = await error.context.json(); if (detail?.error) message = detail.error; } catch {}
+            }
+            throw new Error(message);
+          }
+          if (data?.error) throw new Error(data.error);
+          showMessage('paypalSetupStatus', 'Catálogo y webhook de PayPal preparados en Sandbox.', 'success');
+          await renderBilling();
+        } catch (error) {
+          showMessage('paypalSetupStatus', friendlyError(error), 'error');
+          button.disabled = false;
+          button.textContent = paypalReady ? 'Actualizar catálogo Sandbox' : 'Configurar PayPal Sandbox';
+        }
+      });
     }
 
-    async function renderDeveloper() {
+        async function renderDeveloper() {
       if (!state.isPlatformDeveloper) throw new Error('No tienes acceso a Developer Mode.');
       const [plansRes, entitlementsRes, simulationRes] = await Promise.all([
         state.client.from('plan_catalog')
@@ -1486,7 +1586,7 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
           .select('addon_plan_code,status,current_period_start,current_period_end,cancel_at_period_end')
           .eq('company_id', companyId).maybeSingle(),
         state.client.from('ai_addon_catalog')
-          .select('plan_code,display_name,description,monthly_credits,monthly_price_cents,currency')
+          .select('plan_code,display_name,description,monthly_credits,monthly_price_cents,currency,paypal_plan_id,paypal_environment')
           .eq('is_active', true).order('display_order'),
       ]);
       if (subscriptionRes.error) throw subscriptionRes.error;
@@ -1518,14 +1618,21 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
       const remaining = Math.max(0, monthlyCredits - usedCredits);
       const percent = monthlyCredits ? Math.min(100, Math.round(usedCredits / monthlyCredits * 100)) : 0;
 
-      const planCards = (plansRes.data || []).map(p =>
-        '<article class="ai-plan-card' + (p.plan_code === subscription?.addon_plan_code ? ' is-current' : '') + '">' +
+      const planCards = (plansRes.data || []).map(p => {
+        const price = p.monthly_price_cents === null ? 'Precio por definir' :
+          new Intl.NumberFormat('es-DO', { style: 'currency', currency: p.currency || 'USD' })
+            .format(Number(p.monthly_price_cents) / 100) + ' / mes';
+        const configured = !!p.paypal_plan_id && p.paypal_environment === 'sandbox';
+        const action = configured
+          ? '<button class="btn btn-primary btn-block" type="button" data-paypal-product="ai" data-plan-code="' + escapeHTML(p.plan_code) + '">Contratar ' + escapeHTML(p.display_name) + '</button>'
+          : '<span class="ai-plan-note">Pago Sandbox en preparación</span>';
+        return '<article class="ai-plan-card">' +
           '<div class="ai-plan-name">' + escapeHTML(p.display_name) + '</div>' +
           '<div class="ai-plan-credits">' + Number(p.monthly_credits).toLocaleString('es-DO') + ' <small>créditos / mes</small></div>' +
           '<p>' + escapeHTML(p.description) + '</p>' +
-          '<span class="ai-plan-note">' + (p.monthly_price_cents === null ? 'Precio y contratación por definir' : 'Paquete disponible') + '</span>' +
-        '</article>'
-      ).join('');
+          '<strong class="ai-plan-price">' + escapeHTML(price) + '</strong>' + action +
+        '</article>';
+      }).join('');
 
       if (!active) {
         const statusText = subscription
@@ -1541,8 +1648,11 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
           '</section>' +
           '<section class="section ai-subscribe-section"><div class="ai-section-heading"><div><span class="ai-eyebrow">SHINKA IA · COMPLEMENTO</span><h2>Elige tu capacidad</h2><p>' + escapeHTML(statusText) + '</p></div><span class="ai-status-pill">No activada</span></div>' +
             '<div class="ai-plans-grid">' + (planCards || '<div class="empty-state">No hay paquetes publicados todavía.</div>') + '</div>' +
-            '<div class="ai-setup-note"><strong>Contratación independiente</strong><span>Los paquetes ya están definidos en la plataforma. La activación automática llegará al conectar pagos; no se te cobrará nada desde esta pantalla.</span><span>1 crédito equivale a 1,000 tokens procesados entre la pregunta, el contexto y la respuesta. Los análisis más largos consumen más créditos.</span></div>' +
+            '<div class="ai-setup-note"><strong>SHINKA IA se paga por separado</strong><span>Launch: US$1.49/mes por 1,000 créditos. Pro: US$4.99/mes por 5,000 créditos. Business: US$9.99/mes por 15,000 créditos. El contador se reinicia al comenzar cada ciclo pagado; los cambios entre CORE, FLOW y NEXUS no modifican tu complemento de IA.</span><span>1 crédito equivale a 1,000 tokens combinados de entrada y salida. Los créditos no utilizados no se acumulan para el siguiente período.</span></div>' +
           '</section>';
+        document.querySelectorAll('[data-paypal-product="ai"]').forEach(button => {
+          button.addEventListener('click', () => startPayPalSubscription('ai', button.dataset.planCode, button));
+        });
         return;
       }
 
@@ -1559,7 +1669,7 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
       content.innerHTML =
         '<section class="ai-hero ai-hero-compact">' +
           '<div class="ai-hero-copy"><span class="ai-eyebrow">SHINKA INTELLIGENCE</span><h2>Piensa mejor. Decide con datos.</h2><p>Tu asistente conoce los indicadores autorizados de ' + escapeHTML(state.company.name) + '.</p></div>' +
-          '<div class="ai-credit-box"><span>Créditos disponibles</span><strong id="aiCreditsRemaining">' + remaining.toLocaleString('es-DO') + '</strong><small>de ' + monthlyCredits.toLocaleString('es-DO') + ' este período</small><div class="ai-progress"><i id="aiCreditsProgress" style="width:' + percent + '%"></i></div></div>' +
+          '<div class="ai-credit-box"><span>Créditos disponibles</span><strong id="aiCreditsRemaining">' + remaining.toLocaleString('es-DO') + '</strong><small>de ' + monthlyCredits.toLocaleString('es-DO') + ' este período · Reinicio: ' + new Date(subscription.current_period_end).toLocaleDateString('es-DO') + '</small><div class="ai-progress"><i id="aiCreditsProgress" style="width:' + percent + '%"></i></div></div>' +
         '</section>' +
         '<section class="ai-workspace">' +
           '<aside class="ai-history-panel"><div class="ai-history-head"><strong>Conversaciones</strong><button class="btn btn-secondary small-btn" id="aiNewChat" type="button">＋ Nueva</button></div><div class="ai-conversation-list" id="aiConversationList"></div>' +
