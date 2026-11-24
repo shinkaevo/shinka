@@ -5,15 +5,34 @@ const reply = (data: unknown, status = 200) => new Response(JSON.stringify(data)
   status, headers: { "Content-Type": "application/json", "Cache-Control": "no-store" }
 });
 function secret(name: string, jsonName?: string, legacy: string[] = []): string | null {
-  const direct = Deno.env.get(name); if (direct) return direct;
-  const raw = jsonName ? Deno.env.get(jsonName) : null;
-  if (raw) { try { const v = JSON.parse(raw); if (typeof v === "string") return v;
-    if (v && typeof v === "object") { const d = (v as any).default; if (typeof d === "string") return d;
-      const first = Object.values(v).find(x => typeof x === "string"); if (typeof first === "string") return first; }
-  } catch { return raw; } }
-  for (const n of legacy) { const v = Deno.env.get(n); if (v) return v; }
+  const direct = Deno.env.get(name);
+  if (direct) return direct;
+
+  if (jsonName) {
+    const raw = Deno.env.get(jsonName);
+    if (raw) {
+      try {
+        const parsed: unknown = JSON.parse(raw);
+        if (typeof parsed === "string") return parsed;
+        if (parsed && typeof parsed === "object") {
+          const record = parsed as Record<string, unknown>;
+          if (typeof record.default === "string") return record.default;
+          const first = Object.values(record).find((value) => typeof value === "string");
+          if (typeof first === "string") return first;
+        }
+      } catch (parseError) {
+        return raw;
+      }
+    }
+  }
+
+  for (const legacyName of legacy) {
+    const value = Deno.env.get(legacyName);
+    if (value) return value;
+  }
   return null;
 }
+
 async function api(base: string, token: string, path: string, method = "GET", body?: unknown) {
   const res = await fetch(base + path, { method, headers: { Authorization: "Bearer " + token, Accept: "application/json",
     ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
