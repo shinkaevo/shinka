@@ -894,7 +894,7 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
     function resumePayPalApproval(approvalUrl, button) {
       try {
         const parsed = new URL(String(approvalUrl || ''));
-        if (parsed.protocol !== 'https:' || !/(^|\\.)paypal\\.com$/i.test(parsed.hostname)) {
+        if (parsed.protocol !== 'https:' || !/(^|\.)paypal\.com$/i.test(parsed.hostname)) {
           throw new Error('El enlace de aprobación no pertenece a PayPal.');
         }
         if (button) { button.disabled = true; button.textContent = 'Abriendo PayPal…'; }
