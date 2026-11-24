@@ -4,7 +4,8 @@
 alter table public.plan_catalog
   add column if not exists paypal_plan_id text,
   add column if not exists paypal_environment text,
-  add column if not exists provider_approval_url text;
+  add column if not exists provider_approval_url text,
+  add column if not exists paypal_pending_plan_code text;
 
 alter table public.ai_addon_catalog
   add column if not exists paypal_plan_id text,
