@@ -156,7 +156,7 @@ Deno.serve(async req => {
     if (kind === "core") {
       const trialActive = existing?.status === "trialing" && existing?.trial_ends_at && new Date(existing.trial_ends_at).getTime() > Date.now();
       const values = {
-        company_id: companyId, provider: "paypal", provider_subscription_id: subscriptionId,
+        company_id: companyId, plan_code: existing?.plan_code || code, provider: "paypal", provider_subscription_id: subscriptionId,
         provider_approval_url: approvalUrl, paypal_pending_plan_code: code,
         status: trialActive ? "trialing" : "incomplete", billing_interval: "month",
         currency: plan.currency || "USD", unit_amount_cents: Number(plan.monthly_price_cents), updated_at: new Date().toISOString(),
