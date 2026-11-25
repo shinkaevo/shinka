@@ -921,7 +921,8 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
           body: {
             company_id: state.company.id,
             product_type: productType,
-            plan_code: planCode
+            plan_code: planCode,
+            environment: button?.dataset.paypalEnv || (state.isPlatformDeveloper ? 'sandbox' : 'live')
           }
         });
         if (error) {
@@ -944,17 +945,21 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
 
     async function renderBilling() {
       const status = await refreshSubscriptionAccess();
-      const [plansRes, subscriptionRes] = await Promise.all([
+      const [plansRes, subscriptionRes, productionOperatorRes] = await Promise.all([
         state.client.from('plan_catalog')
-          .select('plan_code,display_name,description,monthly_price_cents,currency,paypal_plan_id,paypal_environment')
+          .select('plan_code,display_name,description,monthly_price_cents,currency,paypal_sandbox_plan_id,paypal_live_plan_id')
           .eq('is_active', true).order('display_order', { ascending: true }),
         state.client.from('subscriptions')
-          .select('id,plan_code,provider,status,trial_ends_at,current_period_end,provider_subscription_id,provider_approval_url,paypal_pending_plan_code')
+          .select('id,plan_code,provider,provider_environment,status,trial_ends_at,current_period_end,provider_subscription_id,provider_approval_url,paypal_pending_plan_code')
           .eq('company_id', state.company.id)
-          .order('created_at', { ascending: false }).limit(1)
+          .order('created_at', { ascending: false }).limit(1),
+        state.client.from('paypal_production_operators')
+          .select('user_id').eq('user_id', state.user.id).eq('is_active', true).maybeSingle()
       ]);
       if (plansRes.error) throw plansRes.error;
       if (subscriptionRes.error) throw subscriptionRes.error;
+      if (productionOperatorRes.error) throw productionOperatorRes.error;
+      const isProductionOperator = !!productionOperatorRes.data;
 
       const plans = plansRes.data || [];
       const currentSub = subscriptionRes.data?.[0] || null;
@@ -970,24 +975,22 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
         && currentSub?.plan_code === status?.plan_code
         && !currentSub?.provider_approval_url;
       const canCheckout = !isActivePaid || isPaypalSubscription;
-      const hasSandboxPlans = plans.some(p => p.paypal_plan_id && p.paypal_environment === 'sandbox');
-      const hasLivePlans = plans.some(p => p.paypal_plan_id && p.paypal_environment === 'live');
-      const paypalReady = plans.some(p => p.paypal_plan_id && (p.paypal_environment === 'live' || (state.isPlatformDeveloper && p.paypal_environment === 'sandbox')));
+      const hasSandboxPlans = plans.some(p => !!p.paypal_sandbox_plan_id);
+      const hasLivePlans = plans.some(p => !!p.paypal_live_plan_id);
+      const paypalReady = state.isPlatformDeveloper ? hasSandboxPlans : hasLivePlans;
       const paymentNotice = hasLivePlans
         ? '<div class="subscription-payment-note"><strong>Pagos seguros con PayPal</strong><span>Las suscripciones se activan y renuevan después de verificar las notificaciones oficiales de PayPal. SHINKA IA se contrata y factura por separado.</span></div>'
         : state.isPlatformDeveloper && hasSandboxPlans
-          ? '<div class="subscription-payment-note"><strong>Entorno de pruebas · PayPal Sandbox</strong><span>Solo la cuenta desarrolladora puede realizar compras ficticias. No se cobrarán fondos reales. Antes de abrir las ventas, activa y verifica PayPal en producción.</span></div>'
-          : hasSandboxPlans
-            ? '<div class="subscription-payment-note"><strong>Facturación en preparación</strong><span>Tu prueba gratuita de 7 días sigue disponible. Los pagos reales se habilitarán cuando SHINKA active y verifique PayPal en producción.</span></div>'
-            : '<div class="subscription-payment-note"><strong>Facturación en preparación</strong><span>Tu prueba gratuita sigue disponible. La contratación se habilitará cuando el sistema de pagos esté listo.</span></div>';
+          ? '<div class="subscription-payment-note"><strong>Entorno de pruebas · PayPal Sandbox</strong><span>Sandbox queda disponible solo para Developer Mode. No procesa dinero real.</span></div>'
+          : '<div class="subscription-payment-note"><strong>Pagos en preparación</strong><span>Tu prueba gratuita de 7 días sigue disponible. La contratación se habilitará cuando el titular adulto conecte PayPal Live.</span></div>';
       const heroTitle = isTrial ? 'Tu prueba gratuita está activa.' :
         status?.has_access ? 'Tu suscripción está activa.' :
         'Tu período de prueba terminó.';
       const heroText = isTrial
-        ? 'Tienes 7 días para probar SHINKA. Puedes mantener el acceso con una suscripción o canjear un serial válido.'
+        ? 'Tienes 7 días para probar SHINKA. Puedes mantener el acceso con una suscripción activa.'
         : status?.has_access
           ? 'Tu espacio de trabajo tiene acceso activo. Los cambios de CORE, FLOW o NEXUS no modifican tu complemento independiente de SHINKA IA.'
-          : 'Para volver a utilizar clientes, pedidos, servicios y finanzas, activa una suscripción o canjea un serial válido. Tus datos y procesos se conservan aunque el acceso se pause.';
+          : 'Para volver a utilizar clientes, pedidos, servicios y finanzas, activa una suscripción. Tus datos y procesos se conservan aunque el acceso se pause.';
 
       const cards = plans.map(plan => {
         const price = new Intl.NumberFormat('es-DO', {
@@ -995,8 +998,9 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
         }).format(Number(plan.monthly_price_cents || 0) / 100);
         const current = plan.plan_code === status?.plan_code;
         const isPending = currentSub?.paypal_pending_plan_code === plan.plan_code && !paypalAlreadyAuthorized;
-        const configured = !!plan.paypal_plan_id && (plan.paypal_environment === 'live' || (state.isPlatformDeveloper && plan.paypal_environment === 'sandbox'));
-        const sandboxBlocked = plan.paypal_environment === 'sandbox' && !state.isPlatformDeveloper;
+        const checkoutEnvironment = state.isPlatformDeveloper ? 'sandbox' : 'live';
+        const configured = checkoutEnvironment === 'live' ? !!plan.paypal_live_plan_id : !!plan.paypal_sandbox_plan_id;
+        const sandboxBlocked = checkoutEnvironment === 'sandbox' && !state.isPlatformDeveloper;
         const buttonLabel = paypalAlreadyAuthorized ? 'Suscripción autorizada' : isPending ? 'Cambio pendiente en PayPal' :
           current && isTrial ? 'Continuar con CORE en PayPal' :
           current && isActivePaid ? 'Plan actual' :
@@ -1009,7 +1013,7 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
           : paypalAlreadyAuthorized
             ? '<span class="subscription-plan-note">' + (isTrial ? 'Suscripción autorizada en PayPal · primer cobro al terminar la prueba' : 'Suscripción activa en PayPal') + '</span>'
             : canShowButton
-            ? '<button class="btn btn-primary btn-block" type="button" data-paypal-product="core" data-plan-code="' + escapeHTML(plan.plan_code) + '">' + escapeHTML(buttonLabel) + '</button>'
+            ? '<button class="btn btn-primary btn-block" type="button" data-paypal-product="core" data-paypal-env="' + checkoutEnvironment + '" data-plan-code="' + escapeHTML(plan.plan_code) + '">' + escapeHTML(buttonLabel) + '</button>'
             : '<span class="subscription-plan-note">' + (isPending ? 'Esperando confirmación segura de PayPal' :
                 current && (isTrial || isActivePaid) ? 'Plan actual' :
                 sandboxBlocked ? 'Los pagos reales estarán disponibles al activar PayPal en producción' :
@@ -1044,44 +1048,17 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
               ? '<div class="subscription-trial-meta"><strong>' + escapeHTML(status.plan_name || status.plan_code || 'Activo') + '</strong><span>Suscripción activa</span></div>'
               : '<div class="subscription-trial-meta"><strong>Datos protegidos</strong><span>Tu información se conserva aunque el acceso esté pausado.</span></div>') +
         '</section>' +
-        (state.role === 'owner'
-          ? '<section class="section" style="margin-top:16px"><div class="toolbar"><div><h2>Activar con serial</h2><p>Introduce un código SHINKA para activar CORE, FLOW o NEXUS en esta empresa.</p></div></div><form id="serialRedeemForm" style="margin-top:14px"><div class="field"><label for="serialRedeemCode">Código de activación</label><input id="serialRedeemCode" name="serial_code" type="text" maxlength="60" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="SHK-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX" required></div><button class="btn btn-primary" type="submit">Activar serial</button></form><div id="serialRedeemMessage" class="message" role="status" aria-live="polite"></div></section>'
-          : '<section class="section" style="margin-top:16px"><h2>Activar con serial</h2><p>Solo el propietario de la empresa puede activar un serial. Pídele al propietario que lo introduzca desde Plan y facturación.</p></section>') +
         '<section class="section subscription-plans-section">' +
           '<div class="toolbar"><div><h2>Planes disponibles</h2><p>Elige el nivel que corresponda al uso de tu empresa.</p></div></div>' +
           '<div class="subscription-plans-grid">' + (cards || '<div class="empty-state">No hay planes disponibles.</div>') + '</div>' +
           paymentNotice +
           (state.isPlatformDeveloper
-            ? '<section class="section" style="margin-top:14px"><div class="toolbar"><div><h2>Configuración del desarrollador</h2><p>Prepara los productos, planes y webhook de PayPal en Sandbox.</p></div><button class="btn btn-secondary" id="paypalSetupBtn" type="button">' + (paypalReady ? 'Actualizar catálogo Sandbox' : 'Configurar PayPal Sandbox') + '</button></div><div id="paypalSetupStatus" class="message" role="status" aria-live="polite"></div></section>'
+            ? '<section class="section" style="margin-top:14px"><div class="toolbar"><div><h2>Developer Mode · Sandbox</h2><p>Prepara los productos, planes y webhook de pruebas. No se procesa dinero real.</p></div><button class="btn btn-secondary" id="paypalSetupBtn" type="button">' + (paypalReady ? 'Actualizar catálogo Sandbox' : 'Configurar PayPal Sandbox') + '</button></div><div id="paypalSetupStatus" class="message" role="status" aria-live="polite"></div></section>'
+            : '') +
+          (isProductionOperator
+            ? '<section class="section" style="margin-top:14px"><div class="toolbar"><div><h2>PayPal Live · Producción</h2><p>Solo el titular adulto autorizado puede preparar los productos, los seis planes y el webhook real, después de guardar las credenciales Live en Supabase.</p></div><button class="btn btn-primary" id="paypalLiveSetupBtn" type="button">Preparar catálogo Live</button></div><div id="paypalLiveSetupStatus" class="message" role="status" aria-live="polite"></div></section>'
             : '') +
         '</section>';
-
-      $('serialRedeemForm')?.addEventListener('submit', async event => {
-        event.preventDefault();
-        const form = event.currentTarget;
-        const button = form.querySelector('button[type="submit"]');
-        const code = String(new FormData(form).get('serial_code') || '').trim();
-        button.disabled = true;
-        button.textContent = 'Validando…';
-        clearMessage('serialRedeemMessage');
-        try {
-          const result = await callShinkaSerialApi({
-            action: 'redeem',
-            company_id: state.company.id,
-            serial_code: code
-          });
-          await refreshCompanyPlan();
-          const access = await refreshSubscriptionAccess();
-          if (!access?.has_access) throw new Error('El serial se procesó, pero el acceso aún no se ha actualizado. Actualiza la página o contacta soporte.');
-          form.reset();
-          await navigate('dashboard');
-          showMessage('globalMessage', 'Serial activado: ' + String(result.plan_name || result.plan_code || 'plan').toUpperCase() + (result.lifetime ? ' · acceso de por vida.' : result.expires_at ? ' · vence ' + new Date(result.expires_at).toLocaleDateString('es-DO') + '.' : '.'), 'success');
-        } catch (error) {
-          showMessage('serialRedeemMessage', friendlyError(error), 'error');
-          button.disabled = false;
-          button.textContent = 'Activar serial';
-        }
-      });
 
       document.querySelectorAll('[data-paypal-product="core"]').forEach(button => {
         button.addEventListener('click', () => startPayPalSubscription('core', button.dataset.planCode, button));
@@ -1094,7 +1071,7 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
         button.disabled = true;
         button.textContent = 'Preparando catálogo…';
         try {
-          const { data, error } = await state.client.functions.invoke('paypal-setup-catalog', { body: {} });
+          const { data, error } = await state.client.functions.invoke('paypal-setup-catalog', { body: { environment: 'sandbox' } });
           if (error) {
             let message = error.message || 'No pudimos configurar PayPal.';
             if (error.context && typeof error.context.json === 'function') {
@@ -1103,7 +1080,7 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
             throw new Error(message);
           }
           if (data?.error) throw new Error(data.error);
-          showMessage('paypalSetupStatus', 'Catálogo y webhook de PayPal preparados en Sandbox.', 'success');
+          showMessage('paypalSetupStatus', 'Catálogo Sandbox preparado.', 'success');
           await renderBilling();
         } catch (error) {
           showMessage('paypalSetupStatus', friendlyError(error), 'error');
@@ -1111,25 +1088,32 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
           button.textContent = paypalReady ? 'Actualizar catálogo Sandbox' : 'Configurar PayPal Sandbox';
         }
       });
-    }
 
-        async function callShinkaSerialApi(payload) {
-      const { data, error } = await state.client.functions.invoke('shinka-serials', { body: payload });
-      if (error) {
-        let message = error.message || 'No pudimos procesar el serial.';
-        if (error.context && typeof error.context.json === 'function') {
-          try {
-            const detail = await error.context.json();
-            if (detail?.error) message = detail.error;
-          } catch {}
+      $('paypalLiveSetupBtn')?.addEventListener('click', async () => {
+        const button = $('paypalLiveSetupBtn');
+        button.disabled = true;
+        button.textContent = 'Preparando Live…';
+        try {
+          const { data, error } = await state.client.functions.invoke('paypal-setup-catalog', { body: { environment: 'live' } });
+          if (error) {
+            let message = error.message || 'No pudimos preparar PayPal Live.';
+            if (error.context && typeof error.context.json === 'function') {
+              try { const detail = await error.context.json(); if (detail?.error) message = detail.error; } catch {}
+            }
+            throw new Error(message);
+          }
+          if (data?.error) throw new Error(data.error);
+          showMessage('paypalLiveSetupStatus', data.message || 'Catálogo Live preparado.', 'success');
+          await renderBilling();
+        } catch (error) {
+          showMessage('paypalLiveSetupStatus', friendlyError(error), 'error');
+          button.disabled = false;
+          button.textContent = 'Preparar catálogo Live';
         }
-        throw new Error(message);
-      }
-      if (data?.error) throw new Error(data.error);
-      return data || {};
+      });
     }
 
-    async function renderDeveloper() {
+        async function renderDeveloper() {
       if (!state.isPlatformDeveloper) throw new Error('No tienes acceso a Developer Mode.');
       const [plansRes, entitlementsRes, simulationRes] = await Promise.all([
         state.client.from('plan_catalog')
@@ -1201,109 +1185,6 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
         '</div>' +
         '<section class="section"><h2>Importante</h2><p>La simulación dura 12 horas y no genera cobros. Los límites de clientes, prospectos, servicios y pedidos se aplican al crear registros. La suscripción y la facturación real siguen siendo independientes.</p>' +
         '<div id="developerMessage" class="message" role="status" aria-live="polite"></div></section>';
-
-      const serialDurationLabel = value => value === '30_days' ? '30 días' : value === '365_days' ? '1 año' : 'De por vida';
-      const serialStatusLabel = value => value === 'available' ? 'Disponible' : value === 'redeemed' ? 'Canjeado' : 'Revocado';
-      const renderSerialRows = items => {
-        if (!items.length) return '<div class="empty-state">Todavía no has generado seriales.</div>';
-        return '<div class="table-wrap"><table><thead><tr><th>Serial</th><th>Plan</th><th>Duración</th><th>Estado</th><th>Creado</th><th>Acción</th></tr></thead><tbody>' +
-          items.map(item => '<tr><td><strong>SHK-••••-••••-••••-' + escapeHTML(item.code_suffix || '----') + '</strong></td>' +
-            '<td>' + escapeHTML(item.plan_name || String(item.plan_code || '').toUpperCase()) + '</td>' +
-            '<td>' + escapeHTML(serialDurationLabel(item.duration_type)) + '</td>' +
-            '<td><span class="badge-status" data-s="' + (item.status === 'redeemed' ? 'completed' : item.status === 'revoked' ? 'cancelled' : 'pending') + '">' + escapeHTML(serialStatusLabel(item.status)) + '</span></td>' +
-            '<td>' + escapeHTML(item.created_at ? new Date(item.created_at).toLocaleDateString('es-DO') : '—') + '</td>' +
-            '<td>' + (item.status !== 'revoked'
-              ? '<button class="btn btn-secondary small-btn" type="button" data-serial-revoke="' + escapeHTML(item.id) + '">' + (item.status === 'redeemed' ? 'Revocar acceso' : 'Revocar') + '</button>'
-              : '<span class="muted">—</span>') + '</td></tr>').join('') +
-          '</tbody></table></div>';
-      };
-
-      $('pageContent').innerHTML +=
-        '<section class="section" style="margin-top:18px"><div class="toolbar"><div><h2>Seriales de acceso</h2><p>Genera códigos de un solo uso para CORE, FLOW o NEXUS. El código completo solo se muestra al crearlo.</p></div><span class="badge-status" data-s="completed">Gestión privada</span></div>' +
-        '<form id="serialGenerateForm" class="form-grid" style="margin-top:16px;align-items:end">' +
-          '<div class="field"><label for="serialPlan">Plan</label><select id="serialPlan" name="plan_code" required>' +
-            plans.map(plan => '<option value="' + escapeHTML(plan.plan_code) + '">' + escapeHTML(plan.display_name) + '</option>').join('') +
-          '</select></div>' +
-          '<div class="field"><label for="serialDuration">Duración</label><select id="serialDuration" name="duration_type" required><option value="30_days">30 días</option><option value="365_days">1 año</option><option value="lifetime">De por vida</option></select></div>' +
-          '<div class="field"><label for="serialCount">Cantidad</label><input id="serialCount" name="count" type="number" min="1" max="25" value="1" required></div>' +
-          '<button class="btn btn-primary" type="submit">Generar seriales</button>' +
-        '</form>' +
-        '<div id="serialGenerated" class="message" role="status" aria-live="polite" style="margin-top:12px;display:none"><strong>Guarda estos códigos ahora. No volverán a mostrarse.</strong><textarea id="serialCodesOutput" rows="4" readonly style="width:100%;margin-top:8px"></textarea><button id="copySerialCodes" class="btn btn-secondary small-btn" type="button" style="margin-top:8px">Copiar códigos</button></div>' +
-        '<div id="serialAdminMessage" class="message" role="status" aria-live="polite"></div></section>' +
-        '<section class="section" style="margin-top:16px"><div class="toolbar"><div><h2>Seriales generados</h2><p>El historial muestra solo los últimos cuatro caracteres; nunca revela el código completo.</p></div></div><div id="serialList">' + renderSerialRows(serials) + '</div></section>';
-
-      async function refreshSerialList() {
-        const result = await callShinkaSerialApi({ action: 'list' });
-        $('serialList').innerHTML = renderSerialRows(Array.isArray(result.items) ? result.items : []);
-        bindSerialRevoke();
-      }
-      function bindSerialRevoke() {
-        document.querySelectorAll('[data-serial-revoke]').forEach(button => {
-          button.addEventListener('click', async () => {
-            const id = button.dataset.serialRevoke;
-            const confirmed = await uiConfirm(
-              '¿Revocar este serial?',
-              'Si ya fue canjeado, la empresa perderá el acceso de ese serial inmediatamente. Sus datos no se borrarán.',
-              'Revocar serial'
-            );
-            if (!confirmed) return;
-            button.disabled = true;
-            button.textContent = 'Revocando…';
-            try {
-              await callShinkaSerialApi({ action: 'revoke', serial_id: id });
-              await refreshSerialList();
-              showMessage('serialAdminMessage', 'Serial revocado. Los datos de la empresa se conservaron.', 'success');
-            } catch (error) {
-              showMessage('serialAdminMessage', friendlyError(error), 'error');
-              button.disabled = false;
-              button.textContent = 'Reintentar';
-            }
-          });
-        });
-      }
-      bindSerialRevoke();
-
-      $('serialGenerateForm')?.addEventListener('submit', async event => {
-        event.preventDefault();
-        const form = event.currentTarget;
-        const button = form.querySelector('button[type="submit"]');
-        const values = new FormData(form);
-        button.disabled = true;
-        button.textContent = 'Generando…';
-        try {
-          const result = await callShinkaSerialApi({
-            action: 'generate',
-            plan_code: String(values.get('plan_code') || ''),
-            duration_type: String(values.get('duration_type') || ''),
-            count: Number(values.get('count') || 1)
-          });
-          const issued = Array.isArray(result.serials) ? result.serials : [];
-          if (!issued.length) throw new Error('No se generaron seriales.');
-          $('serialCodesOutput').value = issued.map(item => item.code).join('\n');
-          const output = $('serialGenerated');
-          output.style.display = 'block';
-          output.className = 'message show success';
-          await refreshSerialList();
-          showMessage('serialAdminMessage', 'Se generaron ' + issued.length + ' serial(es). Copia y guarda los códigos ahora.', 'success');
-        } catch (error) {
-          showMessage('serialAdminMessage', friendlyError(error), 'error');
-        } finally {
-          button.disabled = false;
-          button.textContent = 'Generar seriales';
-        }
-      });
-      $('copySerialCodes')?.addEventListener('click', async () => {
-        const value = $('serialCodesOutput')?.value || '';
-        if (!value) return;
-        try {
-          await navigator.clipboard.writeText(value);
-          showMessage('serialAdminMessage', 'Códigos copiados.', 'success');
-        } catch {
-          $('serialCodesOutput').focus();
-          $('serialCodesOutput').select();
-          showMessage('serialAdminMessage', 'Selecciona el texto y cópialo manualmente.', 'info');
-        }
-      });
 
       document.querySelectorAll('[data-developer-plan]').forEach(button => {
         button.addEventListener('click', async () => {
@@ -1774,10 +1655,10 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
 
       const [subscriptionRes, plansRes] = await Promise.all([
         state.client.from('company_ai_subscriptions')
-          .select('addon_plan_code,status,current_period_start,current_period_end,cancel_at_period_end,provider,provider_subscription_id,provider_approval_url')
+          .select('addon_plan_code,status,current_period_start,current_period_end,cancel_at_period_end,provider,provider_environment,provider_subscription_id,provider_approval_url')
           .eq('company_id', companyId).maybeSingle(),
         state.client.from('ai_addon_catalog')
-          .select('plan_code,display_name,description,monthly_credits,monthly_price_cents,currency,paypal_plan_id,paypal_environment')
+          .select('plan_code,display_name,description,monthly_credits,monthly_price_cents,currency,paypal_sandbox_plan_id,paypal_live_plan_id')
           .eq('is_active', true).order('display_order'),
       ]);
       if (subscriptionRes.error) throw subscriptionRes.error;
@@ -1813,12 +1694,14 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
         const price = p.monthly_price_cents === null ? 'Precio por definir' :
           new Intl.NumberFormat('es-DO', { style: 'currency', currency: p.currency || 'USD' })
             .format(Number(p.monthly_price_cents) / 100) + ' / mes';
-        const configured = !!p.paypal_plan_id && (p.paypal_environment === 'live' || (state.isPlatformDeveloper && p.paypal_environment === 'sandbox'));
-        const sandboxBlocked = p.paypal_environment === 'sandbox' && !state.isPlatformDeveloper;
+        const checkoutEnvironment = state.isPlatformDeveloper ? 'sandbox' : 'live';
+        const configured = checkoutEnvironment === 'live' ? !!p.paypal_live_plan_id : !!p.paypal_sandbox_plan_id;
+        const sandboxBlocked = checkoutEnvironment === 'sandbox' && !state.isPlatformDeveloper;
         const isPending = subscription?.provider === 'paypal'
           && subscription?.addon_plan_code === p.plan_code
           && subscription?.status === 'incomplete';
-        const hasPendingUrl = isPending && !!subscription?.provider_approval_url && !sandboxBlocked;
+        const hasPendingUrl = isPending && !!subscription?.provider_approval_url
+          && (subscription.provider_environment !== 'sandbox' || state.isPlatformDeveloper) && !sandboxBlocked;
         const action = hasPendingUrl
           ? '<button class="btn btn-primary btn-block" type="button" data-paypal-resume="' + escapeHTML(subscription.provider_approval_url) + '">Continuar con PayPal</button>'
           : isPending
@@ -1826,7 +1709,7 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
             : subscription?.provider === 'paypal' && subscription?.status === 'incomplete'
               ? '<span class="ai-plan-note">Termina el pago pendiente antes de elegir otro paquete.</span>'
               : configured
-                ? '<button class="btn btn-primary btn-block" type="button" data-paypal-product="ai" data-plan-code="' + escapeHTML(p.plan_code) + '">Contratar ' + escapeHTML(p.display_name) + '</button>'
+                ? '<button class="btn btn-primary btn-block" type="button" data-paypal-product="ai" data-paypal-env="' + checkoutEnvironment + '" data-plan-code="' + escapeHTML(p.plan_code) + '">Contratar ' + escapeHTML(p.display_name) + '</button>'
                 : '<span class="ai-plan-note">' + (sandboxBlocked ? 'Contratación disponible cuando PayPal esté en producción.' : 'Pago en preparación') + '</span>';
         return '<article class="ai-plan-card">' +
           '<div class="ai-plan-name">' + escapeHTML(p.display_name) + '</div>' +
