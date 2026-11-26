@@ -1787,7 +1787,7 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
         state.aiConversationId = conversations[0]?.id || null;
       }
 
-      content.innerHTML =
+      content.innerHTML = paymentMessage +
         '<section class="ai-hero ai-hero-compact">' +
           '<div class="ai-hero-copy"><span class="ai-eyebrow">SHINKA INTELLIGENCE</span><h2>Piensa mejor. Decide con datos.</h2><p>Tu asistente conoce los indicadores autorizados de ' + escapeHTML(state.company.name) + '.</p></div>' +
           '<div class="ai-credit-box"><span>Créditos disponibles</span><strong id="aiCreditsRemaining">' + remaining.toLocaleString('es-DO') + '</strong><small>de ' + monthlyCredits.toLocaleString('es-DO') + ' este período · Reinicio: ' + new Date(subscription.current_period_end).toLocaleDateString('es-DO') + '</small><div class="ai-progress"><i id="aiCreditsProgress" style="width:' + percent + '%"></i></div></div>' +
