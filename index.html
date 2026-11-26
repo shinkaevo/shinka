@@ -891,17 +891,78 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
       return text;
     }
 
-    function resumePayPalApproval(approvalUrl, button) {
-      try {
-        const parsed = new URL(String(approvalUrl || ''));
-        if (parsed.protocol !== 'https:' || !/(^|\.)paypal\.com$/i.test(parsed.hostname)) {
-          throw new Error('El enlace de aprobación no pertenece a PayPal.');
+    let paypalSdkCache = null;
+
+    async function preparePayPalSubscriptions(environment) {
+      if (paypalSdkCache?.environment === environment && paypalSdkCache.promise) {
+        return paypalSdkCache.promise;
+      }
+
+      const promise = (async () => {
+        const { data, error } = await state.client.functions.invoke('paypal-client-config', {
+          body: { environment }
+        });
+        if (error) {
+          let message = error.message || 'No pudimos preparar la conexión con PayPal.';
+          if (error.context && typeof error.context.json === 'function') {
+            try { const detail = await error.context.json(); if (detail?.error) message = detail.error; } catch {}
+          }
+          throw new Error(message);
         }
-        if (button) { button.disabled = true; button.textContent = 'Abriendo PayPal…'; }
-        window.location.assign(parsed.toString());
+        if (data?.error) throw new Error(data.error);
+        if (!data?.client_id) throw new Error('PayPal no devolvió el identificador público de la aplicación.');
+
+        const scriptUrl = environment === 'live'
+          ? 'https://www.paypal.com/web-sdk/v6/core'
+          : 'https://www.sandbox.paypal.com/web-sdk/v6/core';
+
+        if (!window.paypal?.createInstance) {
+          let script = document.querySelector('script[data-shinka-paypal-sdk]');
+          if (script && script.dataset.environment !== environment) {
+            script.remove();
+            window.paypal = undefined;
+            script = null;
+          }
+          if (!script) {
+            script = document.createElement('script');
+            script.async = true;
+            script.src = scriptUrl;
+            script.dataset.shinkaPaypalSdk = 'true';
+            script.dataset.environment = environment;
+            document.head.appendChild(script);
+          }
+          await new Promise((resolve, reject) => {
+            if (window.paypal?.createInstance) return resolve();
+            script.addEventListener('load', resolve, { once: true });
+            script.addEventListener('error', () => reject(new Error('No pudimos cargar el checkout oficial de PayPal.')), { once: true });
+          });
+        }
+
+        if (!window.paypal?.createInstance) {
+          throw new Error('El checkout de PayPal no terminó de cargar. Recarga la página e inténtalo de nuevo.');
+        }
+
+        const sdkInstance = await window.paypal.createInstance({
+          clientId: data.client_id,
+          components: ['paypal-subscriptions'],
+          pageType: 'checkout'
+        });
+        const methods = await sdkInstance.findEligibleMethods({
+          paymentFlow: 'RECURRING_PAYMENT',
+          currencyCode: 'USD'
+        });
+        return {
+          sdkInstance,
+          eligible: !!methods && typeof methods.isEligible === 'function' && methods.isEligible('paypal') === true
+        };
+      })();
+
+      paypalSdkCache = { environment, promise };
+      try {
+        return await promise;
       } catch (error) {
-        showMessage('globalMessage', friendlyError(error), 'error');
-        if (button) button.disabled = false;
+        paypalSdkCache = null;
+        throw error;
       }
     }
 
@@ -914,34 +975,69 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
         showMessage('globalMessage', 'Solo el propietario del espacio puede contratar o cambiar la facturación.', 'error');
         return;
       }
+
+      const environment = button?.dataset.paypalEnv || (state.isPlatformDeveloper ? 'sandbox' : 'live');
       const original = button?.textContent || 'Continuar con PayPal';
       if (button) { button.disabled = true; button.textContent = 'Conectando con PayPal…'; }
+
       try {
-        const { data, error } = await state.client.functions.invoke('paypal-create-subscription', {
-          body: {
-            company_id: state.company.id,
-            product_type: productType,
-            plan_code: planCode,
-            environment: button?.dataset.paypalEnv || (state.isPlatformDeveloper ? 'sandbox' : 'live')
+        const prepared = await preparePayPalSubscriptions(environment);
+        if (!prepared.eligible) {
+          throw new Error('PayPal no ha habilitado las suscripciones para esta cuenta o sesión. El titular de PayPal debe revisar la habilitación de suscripciones con PayPal.');
+        }
+
+        const session = prepared.sdkInstance.createPayPalSubscriptionPaymentSession({
+          async onApprove() {
+            showMessage('globalMessage', 'PayPal recibió tu aprobación. SHINKA está verificando la suscripción.', 'info');
+            try {
+              await refreshSubscriptionAccess();
+              if (state.page === 'billing') await renderBilling();
+              else if (state.page === 'ai') await renderAi();
+            } catch (error) {
+              console.warn('La aprobación llegó; la actualización de SHINKA sigue pendiente:', error);
+            }
+          },
+          onCancel() {
+            showMessage('globalMessage', 'Cancelaste la aprobación en PayPal. No se activó ningún plan.', 'info');
+            if (button) { button.disabled = false; button.textContent = original; }
+          },
+          onError(error) {
+            console.error('PayPal subscription checkout error:', error?.code || 'unknown', error?.message || '');
+            showMessage('globalMessage', 'PayPal no pudo completar la aprobación. Comprueba la cuenta y la habilitación de suscripciones, o contacta con soporte de PayPal.', 'error');
+            if (button) { button.disabled = false; button.textContent = original; }
           }
         });
-        if (error) {
-          let message = error.message || 'No pudimos iniciar PayPal.';
-          if (error.context && typeof error.context.json === 'function') {
-            try { const detail = await error.context.json(); if (detail?.error) message = detail.error; } catch {}
+
+        // Keep this as a Promise and pass it directly to session.start().
+        // PayPal's SDK needs the original click activation to open its approval experience.
+        const subscriptionPromise = (async () => {
+          const { data, error } = await state.client.functions.invoke('paypal-create-subscription', {
+            body: {
+              company_id: state.company.id,
+              product_type: productType,
+              plan_code: planCode,
+              environment
+            }
+          });
+          if (error) {
+            let message = error.message || 'No pudimos iniciar PayPal.';
+            if (error.context && typeof error.context.json === 'function') {
+              try { const detail = await error.context.json(); if (detail?.error) message = detail.error; } catch {}
+            }
+            throw new Error(message);
           }
-          throw new Error(message);
-        }
-        if (data?.error) throw new Error(data.error);
-        if (!data?.approval_url || !/^https:\/\//i.test(data.approval_url)) {
-          throw new Error('PayPal no devolvió un enlace de aprobación seguro.');
-        }
-        window.location.assign(data.approval_url);
+          if (data?.error) throw new Error(data.error);
+          if (!data?.subscription_id) throw new Error('PayPal no devolvió el identificador de suscripción.');
+          return { subscriptionId: data.subscription_id };
+        })();
+
+        await session.start({ presentationMode: 'auto' }, subscriptionPromise);
       } catch (error) {
         showMessage('globalMessage', friendlyError(error), 'error');
         if (button) { button.disabled = false; button.textContent = original; }
       }
     }
+
 
     async function renderBilling() {
       const status = await refreshSubscriptionAccess();
@@ -963,6 +1059,21 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
 
       const plans = plansRes.data || [];
       const currentSub = subscriptionRes.data?.[0] || null;
+      const checkoutEnvironment = state.isPlatformDeveloper ? 'sandbox' : 'live';
+      const hasCheckoutPlans = plans.some(plan => checkoutEnvironment === 'live'
+        ? !!plan.paypal_live_plan_id
+        : !!plan.paypal_sandbox_plan_id);
+      let paypalCheckoutEligible = false;
+      let paypalCheckoutError = null;
+      if (hasCheckoutPlans) {
+        try {
+          const prepared = await preparePayPalSubscriptions(checkoutEnvironment);
+          paypalCheckoutEligible = prepared.eligible === true;
+        } catch (error) {
+          paypalCheckoutError = error;
+          console.warn('No se pudo preparar el checkout de PayPal:', error);
+        }
+      }
       const isTrial = status?.status === 'trialing' && status?.has_access;
       const endDate = status?.trial_ends_at ? new Date(status.trial_ends_at) : null;
       const dateLabel = endDate && !Number.isNaN(endDate.getTime())
@@ -998,18 +1109,17 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
         }).format(Number(plan.monthly_price_cents || 0) / 100);
         const current = plan.plan_code === status?.plan_code;
         const isPending = currentSub?.paypal_pending_plan_code === plan.plan_code && !paypalAlreadyAuthorized;
-        const checkoutEnvironment = state.isPlatformDeveloper ? 'sandbox' : 'live';
-        const configured = checkoutEnvironment === 'live' ? !!plan.paypal_live_plan_id : !!plan.paypal_sandbox_plan_id;
+        const configured = (checkoutEnvironment === 'live' ? !!plan.paypal_live_plan_id : !!plan.paypal_sandbox_plan_id) && paypalCheckoutEligible;
         const sandboxBlocked = checkoutEnvironment === 'sandbox' && !state.isPlatformDeveloper;
         const buttonLabel = paypalAlreadyAuthorized ? 'Suscripción autorizada' : isPending ? 'Cambio pendiente en PayPal' :
           current && isTrial ? 'Continuar con CORE en PayPal' :
           current && isActivePaid ? 'Plan actual' :
           isActivePaid ? 'Cambiar a ' + plan.display_name :
           'Elegir ' + plan.display_name;
-        const canResume = isPending && !!currentSub?.provider_approval_url && !sandboxBlocked;
+        const canResume = isPending && !!currentSub?.provider_subscription_id && !sandboxBlocked && paypalCheckoutEligible;
         const canShowButton = canCheckout && configured && !isPending && !paypalAlreadyAuthorized && (!current || isTrial);
         const action = canResume
-          ? '<button class="btn btn-primary btn-block" type="button" data-paypal-resume="' + escapeHTML(currentSub.provider_approval_url) + '">Continuar con PayPal</button>'
+          ? '<button class="btn btn-primary btn-block" type="button" data-paypal-product="core" data-paypal-env="' + checkoutEnvironment + '" data-plan-code="' + escapeHTML(plan.plan_code) + '">Continuar con PayPal</button>'
           : paypalAlreadyAuthorized
             ? '<span class="subscription-plan-note">' + (isTrial ? 'Suscripción autorizada en PayPal · primer cobro al terminar la prueba' : 'Suscripción activa en PayPal') + '</span>'
             : canShowButton
@@ -1017,6 +1127,7 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
             : '<span class="subscription-plan-note">' + (isPending ? 'Esperando confirmación segura de PayPal' :
                 current && (isTrial || isActivePaid) ? 'Plan actual' :
                 sandboxBlocked ? 'Los pagos reales estarán disponibles al activar PayPal en producción' :
+                !paypalCheckoutEligible ? 'PayPal no ha habilitado suscripciones para esta cuenta o sesión' :
                 configured ? 'Gestiona el plan actual antes de cambiar' : 'Preparando pago seguro') + '</span>';
         return '<article class="subscription-plan-card' + (current ? ' is-current' : '') + '">' +
           '<div class="subscription-plan-title">' + escapeHTML(plan.display_name) + '</div>' +
@@ -1052,6 +1163,9 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
           '<div class="toolbar"><div><h2>Planes disponibles</h2><p>Elige el nivel que corresponda al uso de tu empresa.</p></div></div>' +
           '<div class="subscription-plans-grid">' + (cards || '<div class="empty-state">No hay planes disponibles.</div>') + '</div>' +
           paymentNotice +
+          (hasCheckoutPlans && !paypalCheckoutEligible
+            ? '<div class="message show info">' + escapeHTML(paypalCheckoutError?.message || 'PayPal no considera elegible esta cuenta para suscripciones. El titular de la cuenta debe revisar su habilitación con PayPal.') + '</div>'
+            : '') +
           (state.isPlatformDeveloper
             ? '<section class="section" style="margin-top:14px"><div class="toolbar"><div><h2>Developer Mode · Sandbox</h2><p>Prepara los productos, planes y webhook de pruebas. No se procesa dinero real.</p></div><button class="btn btn-secondary" id="paypalSetupBtn" type="button">' + (paypalReady ? 'Actualizar catálogo Sandbox' : 'Configurar PayPal Sandbox') + '</button></div><div id="paypalSetupStatus" class="message" role="status" aria-live="polite"></div></section>'
             : '') +
@@ -1062,9 +1176,6 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
 
       document.querySelectorAll('[data-paypal-product="core"]').forEach(button => {
         button.addEventListener('click', () => startPayPalSubscription('core', button.dataset.planCode, button));
-      });
-      document.querySelectorAll('[data-paypal-resume]').forEach(button => {
-        button.addEventListener('click', () => resumePayPalApproval(button.dataset.paypalResume, button));
       });
       $('paypalSetupBtn')?.addEventListener('click', async () => {
         const button = $('paypalSetupBtn');
@@ -1665,6 +1776,21 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
       if (plansRes.error) throw plansRes.error;
 
       const subscription = subscriptionRes.data;
+      const checkoutEnvironment = state.isPlatformDeveloper ? 'sandbox' : 'live';
+      const hasAiCheckoutPlans = (plansRes.data || []).some(plan => checkoutEnvironment === 'live'
+        ? !!plan.paypal_live_plan_id
+        : !!plan.paypal_sandbox_plan_id);
+      let paypalCheckoutEligible = false;
+      let paypalCheckoutError = null;
+      if (hasAiCheckoutPlans) {
+        try {
+          const prepared = await preparePayPalSubscriptions(checkoutEnvironment);
+          paypalCheckoutEligible = prepared.eligible === true;
+        } catch (error) {
+          paypalCheckoutError = error;
+          console.warn('No se pudo preparar el checkout de PayPal para SHINKA IA:', error);
+        }
+      }
       const now = Date.now();
       const active = !!subscription
         && ['active', 'trialing'].includes(subscription.status)
@@ -1694,23 +1820,22 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
         const price = p.monthly_price_cents === null ? 'Precio por definir' :
           new Intl.NumberFormat('es-DO', { style: 'currency', currency: p.currency || 'USD' })
             .format(Number(p.monthly_price_cents) / 100) + ' / mes';
-        const checkoutEnvironment = state.isPlatformDeveloper ? 'sandbox' : 'live';
-        const configured = checkoutEnvironment === 'live' ? !!p.paypal_live_plan_id : !!p.paypal_sandbox_plan_id;
+        const configured = (checkoutEnvironment === 'live' ? !!p.paypal_live_plan_id : !!p.paypal_sandbox_plan_id) && paypalCheckoutEligible;
         const sandboxBlocked = checkoutEnvironment === 'sandbox' && !state.isPlatformDeveloper;
         const isPending = subscription?.provider === 'paypal'
           && subscription?.addon_plan_code === p.plan_code
           && subscription?.status === 'incomplete';
-        const hasPendingUrl = isPending && !!subscription?.provider_approval_url
-          && (subscription.provider_environment !== 'sandbox' || state.isPlatformDeveloper) && !sandboxBlocked;
+        const hasPendingUrl = isPending && !!subscription?.provider_subscription_id
+          && (subscription.provider_environment !== 'sandbox' || state.isPlatformDeveloper) && !sandboxBlocked && paypalCheckoutEligible;
         const action = hasPendingUrl
-          ? '<button class="btn btn-primary btn-block" type="button" data-paypal-resume="' + escapeHTML(subscription.provider_approval_url) + '">Continuar con PayPal</button>'
+          ? '<button class="btn btn-primary btn-block" type="button" data-paypal-product="ai" data-paypal-env="' + checkoutEnvironment + '" data-plan-code="' + escapeHTML(p.plan_code) + '">Continuar con PayPal</button>'
           : isPending
             ? '<span class="ai-plan-note">Esperando confirmación de PayPal</span>'
             : subscription?.provider === 'paypal' && subscription?.status === 'incomplete'
               ? '<span class="ai-plan-note">Termina el pago pendiente antes de elegir otro paquete.</span>'
               : configured
                 ? '<button class="btn btn-primary btn-block" type="button" data-paypal-product="ai" data-paypal-env="' + checkoutEnvironment + '" data-plan-code="' + escapeHTML(p.plan_code) + '">Contratar ' + escapeHTML(p.display_name) + '</button>'
-                : '<span class="ai-plan-note">' + (sandboxBlocked ? 'Contratación disponible cuando PayPal esté en producción.' : 'Pago en preparación') + '</span>';
+                : '<span class="ai-plan-note">' + (sandboxBlocked ? 'Contratación disponible cuando PayPal esté en producción.' : !paypalCheckoutEligible ? 'PayPal no ha habilitado suscripciones para esta cuenta o sesión.' : 'Pago en preparación') + '</span>';
         return '<article class="ai-plan-card">' +
           '<div class="ai-plan-name">' + escapeHTML(p.display_name) + '</div>' +
           '<div class="ai-plan-credits">' + Number(p.monthly_credits).toLocaleString('es-DO') + ' <small>créditos / mes</small></div>' +
@@ -1733,13 +1858,11 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
           '</section>' +
           '<section class="section ai-subscribe-section"><div class="ai-section-heading"><div><span class="ai-eyebrow">SHINKA IA · COMPLEMENTO</span><h2>Elige tu capacidad</h2><p>' + escapeHTML(statusText) + '</p></div><span class="ai-status-pill">No activada</span></div>' +
             '<div class="ai-plans-grid">' + (planCards || '<div class="empty-state">No hay paquetes publicados todavía.</div>') + '</div>' +
+            (hasAiCheckoutPlans && !paypalCheckoutEligible ? '<div class="message show info">' + escapeHTML(paypalCheckoutError?.message || 'PayPal no considera elegible esta cuenta para suscripciones. El titular de la cuenta debe revisar su habilitación con PayPal.') + '</div>' : '') +
             '<div class="ai-setup-note"><strong>SHINKA IA se paga por separado</strong><span>Launch: US$1.49/mes por 1,000 créditos. Pro: US$4.99/mes por 5,000 créditos. Business: US$9.99/mes por 15,000 créditos. El contador se reinicia al comenzar cada ciclo pagado; los cambios entre CORE, FLOW y NEXUS no modifican tu complemento de IA.</span><span>1 crédito equivale a 1,000 tokens combinados de entrada y salida. Los créditos no utilizados no se acumulan para el siguiente período.</span></div>' +
           '</section>';
         document.querySelectorAll('[data-paypal-product="ai"]').forEach(button => {
           button.addEventListener('click', () => startPayPalSubscription('ai', button.dataset.planCode, button));
-        });
-        document.querySelectorAll('[data-paypal-resume]').forEach(button => {
-          button.addEventListener('click', () => resumePayPalApproval(button.dataset.paypalResume, button));
         });
         return;
       }
