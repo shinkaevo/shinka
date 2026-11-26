@@ -948,6 +948,7 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
           pageType: 'checkout'
         });
         const methods = await sdkInstance.findEligibleMethods({
+          paymentFlow: 'RECURRING_PAYMENT',
           currencyCode: 'USD'
         });
         return {
@@ -990,7 +991,18 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
           throw new Error('PayPal no considera elegible este método para esta sesión y moneda. Comprueba la configuración de la cuenta y el país admitido.');
         }
 
-        const session = prepared.sdkInstance.createPayPalSubscriptionSession({
+        // PayPal documents two names across its current v6 reference and
+        // subscription integration samples. Support either exported method.
+        const createSubscriptionSession =
+          prepared.sdkInstance.createPayPalSubscriptionPaymentSession ||
+          prepared.sdkInstance.createPayPalSubscriptionSession;
+        if (typeof createSubscriptionSession !== 'function') {
+          const available = Object.keys(Object.getPrototypeOf(prepared.sdkInstance) || {})
+            .filter(name => /subscription/i.test(name));
+          console.error('PayPal SDK subscription session methods unavailable', available);
+          throw new Error('El SDK de PayPal se cargó, pero no expuso el módulo de suscripciones. Actualiza la página e inténtalo otra vez; si persiste, revisaremos la versión del SDK y los permisos de la aplicación.');
+        }
+        const session = createSubscriptionSession.call(prepared.sdkInstance, {
           async onApprove() {
             showMessage('globalMessage', 'PayPal recibió tu aprobación. SHINKA está verificando la suscripción.', 'info');
             try {
