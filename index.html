@@ -987,7 +987,7 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
           throw new Error('El checkout de PayPal todavía no está listo. Recarga la página y vuelve a intentarlo.');
         }
         if (!prepared.eligible) {
-          throw new Error('PayPal no ha habilitado las suscripciones para esta cuenta o sesión. El titular de PayPal debe revisar la habilitación de suscripciones con PayPal.');
+          throw new Error('PayPal no considera elegible este método para esta sesión y moneda. Comprueba la configuración de la cuenta y el país admitido.');
         }
 
         const session = prepared.sdkInstance.createPayPalSubscriptionSession({
@@ -1168,7 +1168,7 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
           '<div class="subscription-plans-grid">' + (cards || '<div class="empty-state">No hay planes disponibles.</div>') + '</div>' +
           paymentNotice +
           (hasCheckoutPlans && !paypalCheckoutEligible
-            ? '<div class="message show info">' + escapeHTML(paypalCheckoutError?.message || 'PayPal no considera elegible esta cuenta para suscripciones. El titular de la cuenta debe revisar su habilitación con PayPal.') + '</div>'
+            ? '<div class="message show info">' + escapeHTML(paypalCheckoutError?.message || 'PayPal no considera elegible este método para esta sesión y moneda. Revisa la configuración de la cuenta y el país admitido.') + '</div>'
             : '') +
           (state.isPlatformDeveloper
             ? '<section class="section" style="margin-top:14px"><div class="toolbar"><div><h2>Developer Mode · Sandbox</h2><p>Prepara los productos, planes y webhook de pruebas. No se procesa dinero real.</p></div><button class="btn btn-secondary" id="paypalSetupBtn" type="button">' + (paypalReady ? 'Actualizar catálogo Sandbox' : 'Configurar PayPal Sandbox') + '</button></div><div id="paypalSetupStatus" class="message" role="status" aria-live="polite"></div></section>'
