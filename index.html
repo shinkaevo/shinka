@@ -948,7 +948,6 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
           pageType: 'checkout'
         });
         const methods = await sdkInstance.findEligibleMethods({
-          paymentFlow: 'RECURRING_PAYMENT',
           currencyCode: 'USD'
         });
         return {
@@ -991,7 +990,7 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
           throw new Error('PayPal no ha habilitado las suscripciones para esta cuenta o sesión. El titular de PayPal debe revisar la habilitación de suscripciones con PayPal.');
         }
 
-        const session = prepared.sdkInstance.createPayPalSubscriptionPaymentSession({
+        const session = prepared.sdkInstance.createPayPalSubscriptionSession({
           async onApprove() {
             showMessage('globalMessage', 'PayPal recibió tu aprobación. SHINKA está verificando la suscripción.', 'info');
             try {
