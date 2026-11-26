@@ -891,83 +891,6 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
       return text;
     }
 
-    let paypalSdkCache = null;
-
-    async function preparePayPalSubscriptions(environment) {
-      if (paypalSdkCache?.environment === environment && paypalSdkCache.promise) {
-        return paypalSdkCache.promise;
-      }
-
-      const promise = (async () => {
-        const { data, error } = await state.client.functions.invoke('paypal-client-config', {
-          body: { environment }
-        });
-        if (error) {
-          let message = error.message || 'No pudimos preparar la conexión con PayPal.';
-          if (error.context && typeof error.context.json === 'function') {
-            try { const detail = await error.context.json(); if (detail?.error) message = detail.error; } catch {}
-          }
-          throw new Error(message);
-        }
-        if (data?.error) throw new Error(data.error);
-        if (!data?.client_id) throw new Error('PayPal no devolvió el identificador público de la aplicación.');
-
-        const scriptUrl = environment === 'live'
-          ? 'https://www.paypal.com/web-sdk/v6/core'
-          : 'https://www.sandbox.paypal.com/web-sdk/v6/core';
-
-        if (!window.paypal?.createInstance) {
-          let script = document.querySelector('script[data-shinka-paypal-sdk]');
-          if (script && script.dataset.environment !== environment) {
-            script.remove();
-            window.paypal = undefined;
-            script = null;
-          }
-          if (!script) {
-            script = document.createElement('script');
-            script.async = true;
-            script.src = scriptUrl;
-            script.dataset.shinkaPaypalSdk = 'true';
-            script.dataset.environment = environment;
-          }
-          await new Promise((resolve, reject) => {
-            if (window.paypal?.createInstance) return resolve();
-            script.addEventListener('load', resolve, { once: true });
-            script.addEventListener('error', () => reject(new Error('No pudimos cargar el checkout oficial de PayPal.')), { once: true });
-            if (!script.isConnected) document.head.appendChild(script);
-          });
-        }
-
-        if (!window.paypal?.createInstance) {
-          throw new Error('El checkout de PayPal no terminó de cargar. Recarga la página e inténtalo de nuevo.');
-        }
-
-        const sdkInstance = await window.paypal.createInstance({
-          clientId: data.client_id,
-          components: ['paypal-subscriptions'],
-          pageType: 'checkout'
-        });
-        const methods = await sdkInstance.findEligibleMethods({
-          paymentFlow: 'RECURRING_PAYMENT',
-          currencyCode: 'USD'
-        });
-        return {
-          sdkInstance,
-          eligible: !!methods && typeof methods.isEligible === 'function' && methods.isEligible('paypal') === true
-        };
-      })();
-
-      paypalSdkCache = { environment, promise, result: null };
-      try {
-        const result = await promise;
-        if (paypalSdkCache?.promise === promise) paypalSdkCache.result = result;
-        return result;
-      } catch (error) {
-        if (paypalSdkCache?.promise === promise) paypalSdkCache = null;
-        throw error;
-      }
-    }
-
     async function startPayPalSubscription(productType, planCode, button) {
       if (!state.client || !state.company || !state.user) {
         showMessage('globalMessage', 'Inicia sesión antes de continuar con PayPal.', 'error');
@@ -983,71 +906,49 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
       if (button) { button.disabled = true; button.textContent = 'Conectando con PayPal…'; }
 
       try {
-        const prepared = paypalSdkCache?.environment === environment ? paypalSdkCache.result : null;
-        if (!prepared) {
-          throw new Error('El checkout de PayPal todavía no está listo. Recarga la página y vuelve a intentarlo.');
-        }
-        if (!prepared.eligible) {
-          throw new Error('PayPal no considera elegible este método para esta sesión y moneda. Comprueba la configuración de la cuenta y el país admitido.');
-        }
-
-        // PayPal documents two names across its current v6 reference and
-        // subscription integration samples. Support either exported method.
-        const createSubscriptionSession =
-          prepared.sdkInstance.createPayPalSubscriptionPaymentSession ||
-          prepared.sdkInstance.createPayPalSubscriptionSession;
-        if (typeof createSubscriptionSession !== 'function') {
-          const available = Object.keys(Object.getPrototypeOf(prepared.sdkInstance) || {})
-            .filter(name => /subscription/i.test(name));
-          console.error('PayPal SDK subscription session methods unavailable', available);
-          throw new Error('El SDK de PayPal se cargó, pero no expuso el módulo de suscripciones. Actualiza la página e inténtalo otra vez; si persiste, revisaremos la versión del SDK y los permisos de la aplicación.');
-        }
-        const session = createSubscriptionSession.call(prepared.sdkInstance, {
-          async onApprove() {
-            showMessage('globalMessage', 'PayPal recibió tu aprobación. SHINKA está verificando la suscripción.', 'info');
-            try {
-              await refreshSubscriptionAccess();
-              if (state.page === 'billing') await renderBilling();
-              else if (state.page === 'ai') await renderAi();
-            } catch (error) {
-              console.warn('La aprobación llegó; la actualización de SHINKA sigue pendiente:', error);
-            }
-          },
-          onCancel() {
-            showMessage('globalMessage', 'Cancelaste la aprobación en PayPal. No se activó ningún plan.', 'info');
-            if (button) { button.disabled = false; button.textContent = original; }
-          },
-          onError(error) {
-            console.error('PayPal subscription checkout error:', error?.code || 'unknown', error?.message || '');
-            showMessage('globalMessage', 'PayPal no pudo completar la aprobación. Comprueba la cuenta y la habilitación de suscripciones, o contacta con soporte de PayPal.', 'error');
-            if (button) { button.disabled = false; button.textContent = original; }
+        const { data, error } = await state.client.functions.invoke('paypal-create-subscription', {
+          body: {
+            company_id: state.company.id,
+            product_type: productType,
+            plan_code: planCode,
+            environment
           }
         });
-
-        // Keep this as a Promise and pass it directly to session.start().
-        // PayPal's SDK needs the original click activation to open its approval experience.
-        const subscriptionPromise = (async () => {
-          const { data, error } = await state.client.functions.invoke('paypal-create-subscription', {
-            body: {
-              company_id: state.company.id,
-              product_type: productType,
-              plan_code: planCode,
-              environment
-            }
-          });
-          if (error) {
-            let message = error.message || 'No pudimos iniciar PayPal.';
-            if (error.context && typeof error.context.json === 'function') {
-              try { const detail = await error.context.json(); if (detail?.error) message = detail.error; } catch {}
-            }
-            throw new Error(message);
+        if (error) {
+          let message = error.message || 'No pudimos iniciar PayPal.';
+          if (error.context && typeof error.context.json === 'function') {
+            try { const detail = await error.context.json(); if (detail?.error) message = detail.error; } catch {}
           }
-          if (data?.error) throw new Error(data.error);
-          if (!data?.subscription_id) throw new Error('PayPal no devolvió el identificador de suscripción.');
-          return { subscriptionId: data.subscription_id };
-        })();
+          throw new Error(message);
+        }
+        if (data?.error) throw new Error(data.error);
 
-        await session.start({ presentationMode: 'auto' }, subscriptionPromise);
+        if (data?.already_active) {
+          showMessage('globalMessage', 'PayPal ya muestra esta suscripción como activa. SHINKA comprobará la confirmación oficial; no vuelvas a contratar el mismo plan.', 'info');
+          await refreshSubscriptionAccess();
+          if (state.page === 'billing') await renderBilling();
+          else if (state.page === 'ai') await renderAi();
+          return;
+        }
+
+        const approvalUrl = String(data?.approval_url || '');
+        if (!approvalUrl) {
+          throw new Error('PayPal no devolvió un enlace de aprobación. No se creó otro intento; revisa el estado de la suscripción existente.');
+        }
+
+        const destination = new URL(approvalUrl);
+        const host = destination.hostname.toLowerCase();
+        const trustedPayPalHost = host === 'paypal.com' || host.endsWith('.paypal.com');
+        if (destination.protocol !== 'https:' || !trustedPayPalHost) {
+          throw new Error('PayPal devolvió un enlace de aprobación no válido. No lo abrimos por seguridad.');
+        }
+
+        showMessage('globalMessage', data?.reused
+          ? 'Abriendo tu aprobación pendiente de PayPal…'
+          : data?.revised
+            ? 'Abriendo la confirmación del cambio de plan en PayPal…'
+            : 'Abriendo PayPal para revisar la suscripción…', 'info');
+        window.location.assign(destination.toString());
       } catch (error) {
         showMessage('globalMessage', friendlyError(error), 'error');
         if (button) { button.disabled = false; button.textContent = original; }
@@ -1079,17 +980,8 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
       const hasCheckoutPlans = plans.some(plan => checkoutEnvironment === 'live'
         ? !!plan.paypal_live_plan_id
         : !!plan.paypal_sandbox_plan_id);
-      let paypalCheckoutEligible = false;
-      let paypalCheckoutError = null;
-      if (hasCheckoutPlans) {
-        try {
-          const prepared = await preparePayPalSubscriptions(checkoutEnvironment);
-          paypalCheckoutEligible = prepared.eligible === true;
-        } catch (error) {
-          paypalCheckoutError = error;
-          console.warn('No se pudo preparar el checkout de PayPal:', error);
-        }
-      }
+      const paypalCheckoutEligible = hasCheckoutPlans;
+      const paypalCheckoutError = null;
       const isTrial = status?.status === 'trialing' && status?.has_access;
       const endDate = status?.trial_ends_at ? new Date(status.trial_ends_at) : null;
       const dateLabel = endDate && !Number.isNaN(endDate.getTime())
@@ -1792,21 +1684,23 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
       if (plansRes.error) throw plansRes.error;
 
       const subscription = subscriptionRes.data;
+      const paypalQuery = new URLSearchParams(window.location.search);
+      const paypalResult = paypalQuery.get('paypal');
+      const paypalProduct = paypalQuery.get('product');
+      const paymentMessage = paypalResult && paypalProduct === 'ai'
+        ? paypalResult === 'success'
+          ? '<div class="message show info">PayPal recibió la aprobación de SHINKA IA. Estamos verificando la notificación oficial; los créditos se habilitarán cuando se confirme.</div>'
+          : '<div class="message show info">No se completó la aprobación de SHINKA IA. No se activó el complemento.</div>'
+        : '';
+      if (paypalResult && paypalProduct === 'ai') {
+        window.history.replaceState({}, document.title, window.location.pathname + window.location.hash);
+      }
       const checkoutEnvironment = state.isPlatformDeveloper ? 'sandbox' : 'live';
       const hasAiCheckoutPlans = (plansRes.data || []).some(plan => checkoutEnvironment === 'live'
         ? !!plan.paypal_live_plan_id
         : !!plan.paypal_sandbox_plan_id);
-      let paypalCheckoutEligible = false;
-      let paypalCheckoutError = null;
-      if (hasAiCheckoutPlans) {
-        try {
-          const prepared = await preparePayPalSubscriptions(checkoutEnvironment);
-          paypalCheckoutEligible = prepared.eligible === true;
-        } catch (error) {
-          paypalCheckoutError = error;
-          console.warn('No se pudo preparar el checkout de PayPal para SHINKA IA:', error);
-        }
-      }
+      const paypalCheckoutEligible = hasAiCheckoutPlans;
+      const paypalCheckoutError = null;
       const now = Date.now();
       const active = !!subscription
         && ['active', 'trialing'].includes(subscription.status)
@@ -1864,7 +1758,7 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
         const statusText = subscription
           ? (subscription.status === 'past_due' ? 'El pago de SHINKA IA está pendiente.' : 'La suscripción de SHINKA IA no está activa.')
           : 'SHINKA IA se contrata por separado. Tu plan CORE, FLOW o NEXUS no cambia por activar este complemento.';
-        content.innerHTML =
+        content.innerHTML = paymentMessage +
           '<section class="ai-hero">' +
             '<div class="ai-hero-copy"><span class="ai-eyebrow">PRODUCTO INDEPENDIENTE · ZUREY DIGITAL</span>' +
               '<h2>La inteligencia de tu negocio.</h2>' +
@@ -2263,7 +2157,21 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
     $('logoutBtn').addEventListener('click',async()=>{const {error}=await state.client.auth.signOut();if(error){alert(friendlyError(error));return;}state.user=null;state.company=null;state.role=null;state.effectivePlanCode=null;state.planEntitlements={};state.subscriptionAccess=null;state.developerSimulation=null;state.isPlatformDeveloper=false;syncRoleNavigation();applyCompanyAppearance();$('authForm').reset();setPasswordVisibility(false);setMode('login');showView('auth');});
 
     (async function boot(){
-      try{initClient();const {data:{session},error}=await state.client.auth.getSession();if(error)throw error;if(session?.user){if(!(await requirePrivilegedMfa(session.user)))await loadWorkspace(session.user);}else showView('auth');state.client.auth.onAuthStateChange((event)=>{if(event==='SIGNED_OUT'){mfaGate.user=null;mfaGate.mode=null;mfaGate.factorId=null;state.user=null;state.company=null;state.role=null;state.isPlatformDeveloper=false;state.developerSimulation=null;state.subscriptionAccess=null;syncRoleNavigation();applyCompanyAppearance();showView('auth');}});}
+      try{
+        initClient();
+        const {data:{session},error}=await state.client.auth.getSession();
+        if(error)throw error;
+        if(session?.user){
+          if(!(await requirePrivilegedMfa(session.user))){
+            await loadWorkspace(session.user);
+            const paypalParams = new URLSearchParams(window.location.search);
+            const paypalReturn = paypalParams.get('paypal');
+            if (paypalReturn === 'success' || paypalReturn === 'cancelled') {
+              await navigate(paypalParams.get('product') === 'ai' ? 'ai' : 'billing');
+            }
+          }
+        } else showView('auth');
+        state.client.auth.onAuthStateChange((event)=>{if(event==='SIGNED_OUT'){mfaGate.user=null;mfaGate.mode=null;mfaGate.factorId=null;state.user=null;state.company=null;state.role=null;state.isPlatformDeveloper=false;state.developerSimulation=null;state.subscriptionAccess=null;syncRoleNavigation();applyCompanyAppearance();showView('auth');}});}
       catch(error){showView('auth');showMessage('authMessage',friendlyError(error),'error');}
     })();
   </script>
