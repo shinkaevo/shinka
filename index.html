@@ -957,11 +957,13 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
         };
       })();
 
-      paypalSdkCache = { environment, promise };
+      paypalSdkCache = { environment, promise, result: null };
       try {
-        return await promise;
+        const result = await promise;
+        if (paypalSdkCache?.promise === promise) paypalSdkCache.result = result;
+        return result;
       } catch (error) {
-        paypalSdkCache = null;
+        if (paypalSdkCache?.promise === promise) paypalSdkCache = null;
         throw error;
       }
     }
@@ -981,7 +983,10 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
       if (button) { button.disabled = true; button.textContent = 'Conectando con PayPal…'; }
 
       try {
-        const prepared = await preparePayPalSubscriptions(environment);
+        const prepared = paypalSdkCache?.environment === environment ? paypalSdkCache.result : null;
+        if (!prepared) {
+          throw new Error('El checkout de PayPal todavía no está listo. Recarga la página y vuelve a intentarlo.');
+        }
         if (!prepared.eligible) {
           throw new Error('PayPal no ha habilitado las suscripciones para esta cuenta o sesión. El titular de PayPal debe revisar la habilitación de suscripciones con PayPal.');
         }
