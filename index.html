@@ -929,12 +929,12 @@ dialog p{margin:0 0 6px}dialog .sub{color:var(--muted);font-size:14px;margin-bot
             script.src = scriptUrl;
             script.dataset.shinkaPaypalSdk = 'true';
             script.dataset.environment = environment;
-            document.head.appendChild(script);
           }
           await new Promise((resolve, reject) => {
             if (window.paypal?.createInstance) return resolve();
             script.addEventListener('load', resolve, { once: true });
             script.addEventListener('error', () => reject(new Error('No pudimos cargar el checkout oficial de PayPal.')), { once: true });
+            if (!script.isConnected) document.head.appendChild(script);
           });
         }
 
